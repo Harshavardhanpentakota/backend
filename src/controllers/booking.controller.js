@@ -100,7 +100,10 @@ const getBookings = async (req, res, next) => {
     // Non-admin users only see their own bookings
     if (req.user.role === 'user') filter.user = req.user._id;
 
-    if (status) filter.status = status;
+    if (status) {
+      const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+      filter.status = statuses.length === 1 ? statuses[0] : { $in: statuses };
+    }
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (from || to) {
       filter.checkInDate = {};

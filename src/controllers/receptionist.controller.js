@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const Booking = require('../models/Booking');
 const Room = require('../models/Room');
@@ -14,7 +14,7 @@ const {
 } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const populateBooking = (query) =>
   query
@@ -53,7 +53,7 @@ const buildInvoiceData = (booking, settings) => {
   };
 };
 
-// ── POST /api/reception/book ──────────────────────────────────────────────────
+// â”€â”€ POST /api/reception/book â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const createOfflineBooking = async (req, res, next) => {
   try {
     const {
@@ -120,7 +120,7 @@ const createOfflineBooking = async (req, res, next) => {
   }
 };
 
-// ── GET /api/reception/bookings/:bookingId ────────────────────────────────────
+// â”€â”€ GET /api/reception/bookings/:bookingId â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getBookingDetail = async (req, res, next) => {
   try {
     const booking = await populateBooking(Booking.findOne({ bookingId: req.params.bookingId }));
@@ -133,7 +133,7 @@ const getBookingDetail = async (req, res, next) => {
   }
 };
 
-// ── POST /api/reception/checkin ───────────────────────────────────────────────
+// â”€â”€ POST /api/reception/checkin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const checkIn = async (req, res, next) => {
   try {
     const { bookingId, advancePaymentMethod = 'cash' } = req.body;
@@ -142,7 +142,7 @@ const checkIn = async (req, res, next) => {
     if (!booking) return sendError(res, 404, 'Booking not found');
 
     if (booking.status !== BOOKING_STATUS.CONFIRMED) {
-      return sendError(res, 409, `Cannot check in — booking status is: ${booking.status}`);
+      return sendError(res, 409, `Cannot check in â€” booking status is: ${booking.status}`);
     }
 
     const settings = await HotelSettings.getSettings();
@@ -158,7 +158,7 @@ const checkIn = async (req, res, next) => {
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
 
-    logger.info(`Check-in: ${bookingId} | Advance: ₹${advancePaid}`);
+    logger.info(`Check-in: ${bookingId} | Advance: â‚¹${advancePaid}`);
     return sendSuccess(res, 200, 'Guest checked in successfully', {
       bookingId: booking.bookingId,
       room: `Room ${booking.room.roomNumber}`,
@@ -172,7 +172,7 @@ const checkIn = async (req, res, next) => {
   }
 };
 
-// ── POST /api/reception/bookings/:bookingId/charges ───────────────────────────
+// â”€â”€ POST /api/reception/bookings/:bookingId/charges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const addExtraCharge = async (req, res, next) => {
   try {
     const { bookingId } = req.params;
@@ -199,14 +199,14 @@ const addExtraCharge = async (req, res, next) => {
     const settings = await HotelSettings.getSettings();
     const invoicePreview = buildInvoiceData(booking, settings);
 
-    logger.info(`Extra charge added to ${bookingId}: ${description} ₹${amount}`);
+    logger.info(`Extra charge added to ${bookingId}: ${description} â‚¹${amount}`);
     return sendSuccess(res, 200, 'Charge added', { extraCharges: booking.extraCharges, invoicePreview });
   } catch (error) {
     next(error);
   }
 };
 
-// ── DELETE /api/reception/bookings/:bookingId/charges/:chargeId ───────────────
+// â”€â”€ DELETE /api/reception/bookings/:bookingId/charges/:chargeId â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const removeExtraCharge = async (req, res, next) => {
   try {
     const { bookingId, chargeId } = req.params;
@@ -231,16 +231,16 @@ const removeExtraCharge = async (req, res, next) => {
   }
 };
 
-// ── POST /api/reception/checkout ──────────────────────────────────────────────
+// â”€â”€ POST /api/reception/checkout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const checkOut = async (req, res, next) => {
   try {
-    const { bookingId } = req.body;
+    const { bookingId, balancePaymentMethod = 'cash' } = req.body;
 
     const booking = await populateBooking(Booking.findOne({ bookingId }));
     if (!booking) return sendError(res, 404, 'Booking not found');
 
     if (booking.status !== BOOKING_STATUS.CHECKED_IN) {
-      return sendError(res, 409, `Cannot check out — booking status is: ${booking.status}`);
+      return sendError(res, 409, `Cannot check out â€” booking status is: ${booking.status}`);
     }
 
     const settings = await HotelSettings.getSettings();
@@ -267,12 +267,14 @@ const checkOut = async (req, res, next) => {
         user: booking.user?._id || booking.createdBy,
         room: booking.room._id,
         ...inv,
+        advancePaymentMethod: booking.advancePaymentMethod || 'cash',
+        balancePaymentMethod,
         generatedAt: new Date(),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    logger.info(`Check-out: ${bookingId} | Invoice: ${invoiceDoc.invoiceNumber} | Total: ₹${inv.totalAmount}`);
+    logger.info(`Check-out: ${bookingId} | Invoice: ${invoiceDoc.invoiceNumber} | Total: â‚¹${inv.totalAmount}`);
 
     return sendSuccess(res, 200, 'Guest checked out successfully', {
       bookingId: booking.bookingId,
@@ -286,7 +288,7 @@ const checkOut = async (req, res, next) => {
   }
 };
 
-// ── GET /api/reception/today ──────────────────────────────────────────────────
+// â”€â”€ GET /api/reception/today â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getTodayActivity = async (req, res, next) => {
   try {
     const today = new Date();
@@ -330,201 +332,3 @@ module.exports = {
   removeExtraCharge,
   getTodayActivity,
 };
-const { sendSuccess, sendError } = require('../utils/response');
-const {
-  generateBookingId, generateInvoiceNumber, calculateNights, addGST,
-} = require('../utils/helpers');
-const logger = require('../utils/logger');
-
-// POST /api/reception/book — offline / walk-in booking
-const createOfflineBooking = async (req, res, next) => {
-  try {
-    const {
-      roomId, checkInDate, checkOutDate, guests,
-      guestDetails, specialRequests, source,
-    } = req.body;
-
-    const checkIn = new Date(checkInDate);
-    const checkOut = new Date(checkOutDate);
-
-    const room = await Room.findById(roomId);
-    if (!room || !room.isActive) return sendError(res, 404, 'Room not found');
-    if (room.status === ROOM_STATUS.MAINTENANCE) {
-      return sendError(res, 409, 'Room is under maintenance');
-    }
-
-    // Check availability
-    const conflict = await Booking.findOne({
-      room: roomId,
-      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
-      $or: [{ checkInDate: { $lt: checkOut }, checkOutDate: { $gt: checkIn } }],
-    });
-    if (conflict) return sendError(res, 409, 'Room is not available for the selected dates');
-
-    // Find or create guest user
-    let guestUser = await User.findOne({ email: guestDetails.email });
-    if (!guestUser && guestDetails.email) {
-      guestUser = await User.create({
-        name: guestDetails.name,
-        email: guestDetails.email,
-        phone: guestDetails.phone,
-        password: `Guest@${Date.now()}`, // Temp password — user should reset
-        role: 'user',
-      });
-    }
-
-    const nights = calculateNights(checkIn, checkOut);
-    const baseAmount = room.price * nights;
-    const { subtotal, tax, totalAmount } = addGST(baseAmount);
-
-    const booking = await Booking.create({
-      bookingId: generateBookingId(),
-      user: guestUser?._id || req.user._id,
-      room: roomId,
-      checkInDate: checkIn,
-      checkOutDate: checkOut,
-      guests,
-      nights,
-      subtotal,
-      tax,
-      totalAmount,
-      status: BOOKING_STATUS.CONFIRMED,
-      source: source || BOOKING_SOURCE.OFFLINE,
-      createdBy: req.user._id,
-      guestDetails,
-      specialRequests,
-    });
-
-    logger.info(`Offline booking created: ${booking.bookingId} by receptionist ${req.user._id}`);
-
-    const populated = await booking.populate([
-      { path: 'room', select: 'roomNumber type price' },
-      { path: 'user', select: 'name email phone' },
-    ]);
-
-    return sendSuccess(res, 201, 'Offline booking created successfully', populated);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// POST /api/reception/checkin
-const checkIn = async (req, res, next) => {
-  try {
-    const { bookingId } = req.body;
-
-    const booking = await Booking.findOne({ bookingId }).populate('room');
-    if (!booking) return sendError(res, 404, 'Booking not found');
-
-    if (booking.status !== BOOKING_STATUS.CONFIRMED) {
-      return sendError(res, 409, `Cannot check in — booking status is: ${booking.status}`);
-    }
-
-    booking.status = BOOKING_STATUS.CHECKED_IN;
-    booking.actualCheckIn = new Date();
-    await booking.save();
-
-    // Mark room as occupied
-    await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
-
-    logger.info(`Check-in completed: ${bookingId}`);
-    return sendSuccess(res, 200, 'Guest checked in successfully', {
-      bookingId: booking.bookingId,
-      room: `Room ${booking.room.roomNumber}`,
-      checkInTime: booking.actualCheckIn,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// POST /api/reception/checkout
-const checkOut = async (req, res, next) => {
-  try {
-    const { bookingId } = req.body;
-
-    const booking = await Booking.findOne({ bookingId }).populate('room').populate('user', 'name email');
-    if (!booking) return sendError(res, 404, 'Booking not found');
-
-    if (booking.status !== BOOKING_STATUS.CHECKED_IN) {
-      return sendError(res, 409, `Cannot check out — booking status is: ${booking.status}`);
-    }
-
-    booking.status = BOOKING_STATUS.CHECKED_OUT;
-    booking.actualCheckOut = new Date();
-    await booking.save();
-
-    // Mark room as available
-    await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.AVAILABLE, lastCleaned: null });
-
-    // Update user total stays
-    await User.findByIdAndUpdate(booking.user._id, { $inc: { totalStays: 1 } });
-
-    // Ensure invoice exists
-    let invoice = await Invoice.findOne({ booking: booking._id });
-    if (!invoice) {
-      invoice = await Invoice.create({
-        invoiceNumber: generateInvoiceNumber(),
-        booking: booking._id,
-        user: booking.user._id,
-        room: booking.room._id,
-        subtotal: booking.subtotal,
-        tax: booking.tax,
-        totalAmount: booking.totalAmount,
-      });
-    }
-
-    logger.info(`Check-out completed: ${bookingId}`);
-    return sendSuccess(res, 200, 'Guest checked out successfully', {
-      bookingId: booking.bookingId,
-      room: `Room ${booking.room.roomNumber}`,
-      checkOutTime: booking.actualCheckOut,
-      invoiceNumber: invoice.invoiceNumber,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// GET /api/reception/today — today's check-ins and check-outs
-const getTodayActivity = async (req, res, next) => {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const [checkIns, checkOuts, currentGuests] = await Promise.all([
-      Booking.find({
-        checkInDate: { $gte: today, $lt: tomorrow },
-        status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN] },
-      })
-        .populate('user', 'name email phone')
-        .populate('room', 'roomNumber type floor'),
-      Booking.find({
-        checkOutDate: { $gte: today, $lt: tomorrow },
-        status: BOOKING_STATUS.CHECKED_IN,
-      })
-        .populate('user', 'name email phone')
-        .populate('room', 'roomNumber type floor'),
-      Booking.find({ status: BOOKING_STATUS.CHECKED_IN })
-        .populate('user', 'name email phone')
-        .populate('room', 'roomNumber type floor'),
-    ]);
-
-    return sendSuccess(res, 200, "Today's activity fetched", {
-      todayCheckIns: checkIns,
-      todayCheckOuts: checkOuts,
-      currentlyOccupied: currentGuests,
-      summary: {
-        totalCheckIns: checkIns.length,
-        totalCheckOuts: checkOuts.length,
-        currentGuests: currentGuests.length,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-module.exports = { createOfflineBooking, checkIn, checkOut, getTodayActivity };

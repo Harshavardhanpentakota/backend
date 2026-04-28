@@ -49,7 +49,9 @@ const invoiceSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true },    // subtotal + tax
     // ── Payment summary ───────────────────────────────────────────────────────
     advancePaid: { type: Number, default: 0 },
+    advancePaymentMethod: { type: String, default: 'cash' },
     balanceDue: { type: Number, default: 0 },         // totalAmount - advancePaid
+    balancePaymentMethod: { type: String, default: 'cash' },
     // ── Meta ──────────────────────────────────────────────────────────────────
     generatedAt: { type: Date, default: Date.now },
     pdfPath: { type: String },
