@@ -110,7 +110,13 @@ const getBookings = async (req, res, next) => {
       if (from) filter.checkInDate.$gte = new Date(from);
       if (to) filter.checkInDate.$lte = new Date(to);
     }
-    if (search) filter.bookingId = { $regex: search, $options: 'i' };
+    if (search) {
+      filter.$or = [
+        { bookingId: { $regex: search, $options: 'i' } },
+        { 'guestDetails.name': { $regex: search, $options: 'i' } },
+        { 'guestDetails.phone': { $regex: search, $options: 'i' } },
+      ];
+    }
 
     const [bookings, total] = await Promise.all([
       Booking.find(filter)

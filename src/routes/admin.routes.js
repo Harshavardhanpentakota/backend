@@ -7,6 +7,7 @@ const {
   getStaff, createStaff, updateStaff, deleteStaff,
   getUsers, updateBookingStatus,
   getRoomsAdmin, updateRoomAdmin,
+  getActiveGuests, changeGuestRoom,
   getSettings, updateSettings,
 } = require('../controllers/admin.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
@@ -21,6 +22,9 @@ router.use(authenticate);
 // GET rooms & users are needed by receptionist (Allocation, Guests pages)
 router.get('/rooms', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), getRoomsAdmin);
 router.get('/users', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), getUsers);
+// Active guests — receptionist needs this for check-in/out operations
+router.get('/active-guests', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), getActiveGuests);
+router.patch('/bookings/:id/change-room', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), [param('id').isMongoId(), body('newRoomId').isMongoId()], validate, changeGuestRoom);
 
 // ── Admin-only from here down ─────────────────────────────────────────────────
 router.use(authorize(ROLES.ADMIN));

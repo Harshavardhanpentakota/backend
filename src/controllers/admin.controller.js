@@ -46,21 +46,22 @@ const getDashboard = async (req, res, next) => {
       Booking.countDocuments({ status: BOOKING_STATUS.CONFIRMED }),
       User.countDocuments({ role: 'user', isActive: true }),
       Staff.countDocuments({ isActive: true }),
-      Payment.aggregate([
-        { $match: { status: PAYMENT_STATUS.PAID } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+      // Revenue from completed/checked-out bookings (totalAmount)
+      Booking.aggregate([
+        { $match: { status: { $in: [BOOKING_STATUS.CHECKED_OUT, BOOKING_STATUS.COMPLETED] } } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } },
       ]),
-      Payment.aggregate([
+      Booking.aggregate([
         {
           $match: {
-            status: PAYMENT_STATUS.PAID,
-            paidAt: {
+            status: { $in: [BOOKING_STATUS.CHECKED_OUT, BOOKING_STATUS.COMPLETED] },
+            checkOutDate: {
               $gte: new Date(today.getFullYear(), today.getMonth(), 1),
               $lt: new Date(today.getFullYear(), today.getMonth() + 1, 1),
             },
           },
         },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } },
       ]),
       Booking.find()
         .sort({ createdAt: -1 })
@@ -92,15 +93,15 @@ const getRevenueReport = async (req, res, next) => {
   try {
     const months = parseInt(req.query.months, 10) || 6;
 
-    const result = await Payment.aggregate([
-      { $match: { status: PAYMENT_STATUS.PAID } },
+    const result = await Booking.aggregate([
+      { $match: { status: { $in: [BOOKING_STATUS.CHECKED_OUT, BOOKING_STATUS.COMPLETED] } } },
       {
         $group: {
           _id: {
-            year: { $year: '$paidAt' },
-            month: { $month: '$paidAt' },
+            year: { $year: '$checkOutDate' },
+            month: { $month: '$checkOutDate' },
           },
-          revenue: { $sum: '$amount' },
+          revenue: { $sum: '$totalAmount' },
           count: { $sum: 1 },
         },
       },
@@ -108,7 +109,14 @@ const getRevenueReport = async (req, res, next) => {
       { $limit: months },
     ]);
 
-    return sendSuccess(res, 200, 'Revenue report fetched', result.reverse());
+    const months_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const formatted = result.reverse().map((r) => ({
+      month: `${months_names[r._id.month - 1]} ${r._id.year}`,
+      revenue: r.revenue,
+      count: r.count,
+    }));
+
+    return sendSuccess(res, 200, 'Revenue report fetched', formatted);
   } catch (error) {
     next(error);
   }
@@ -285,6 +293,64 @@ const updateRoomAdmin = async (req, res, next) => {
 
 // ── Hotel Settings (admin) ────────────────────────────────────────────────────
 
+// GET /api/admin/active-guests — all currently checked-in bookings
+const getActiveGuests = async (req, res, next) => {
+  try {
+    const bookings = await Booking.find({ status: BOOKING_STATUS.CHECKED_IN })
+      .populate('room', 'roomNumber type floor price')
+      .populate('user', 'name email phone')
+      .sort({ actualCheckIn: -1 });
+    return sendSuccess(res, 200, 'Active guests fetched', bookings);
+  } catch (error) { next(error); }
+};
+
+// PATCH /api/admin/bookings/:id/change-room — move guest to a different room
+const changeGuestRoom = async (req, res, next) => {
+  try {
+    const { newRoomId } = req.body;
+    if (!newRoomId) return sendError(res, 400, 'newRoomId is required');
+
+    const booking = await Booking.findById(req.params.id).populate('room');
+    if (!booking) return sendError(res, 404, 'Booking not found');
+    if (booking.status !== BOOKING_STATUS.CHECKED_IN) {
+      return sendError(res, 409, 'Can only change room for checked-in guests');
+    }
+
+    const newRoom = await Room.findById(newRoomId);
+    if (!newRoom || !newRoom.isActive) return sendError(res, 404, 'New room not found');
+    if (newRoom.status !== ROOM_STATUS.AVAILABLE) {
+      return sendError(res, 409, `Room ${newRoom.roomNumber} is not available (status: ${newRoom.status})`);
+    }
+
+    const oldRoomId = booking.room._id;
+
+    // Recalculate subtotal with new room price
+    const nights = booking.nights;
+    const newSubtotal = newRoom.price * nights;
+    const settings = await HotelSettings.getSettings();
+    const cgst = Math.round(newSubtotal * settings.cgstPercentage) / 100;
+    const sgst = Math.round(newSubtotal * settings.sgstPercentage) / 100;
+    const tax = cgst + sgst;
+    const totalAmount = newSubtotal + tax + (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
+
+    booking.room = newRoomId;
+    booking.subtotal = newSubtotal;
+    booking.tax = tax;
+    booking.totalAmount = totalAmount;
+    await booking.save();
+
+    // Free old room, occupy new room
+    await Room.findByIdAndUpdate(oldRoomId, { status: ROOM_STATUS.AVAILABLE });
+    await Room.findByIdAndUpdate(newRoomId, { status: ROOM_STATUS.OCCUPIED });
+
+    const updated = await Booking.findById(booking._id)
+      .populate('room', 'roomNumber type floor price')
+      .populate('user', 'name email phone');
+
+    return sendSuccess(res, 200, `Guest moved to Room ${newRoom.roomNumber}`, updated);
+  } catch (error) { next(error); }
+};
+
 // GET /api/admin/settings
 const getSettings = async (req, res, next) => {
   try {
@@ -324,6 +390,8 @@ module.exports = {
   updateBookingStatus,
   // Rooms
   getRoomsAdmin, updateRoomAdmin,
+  // Active guests + room change
+  getActiveGuests, changeGuestRoom,
   // Settings
   getSettings, updateSettings,
 };
