@@ -94,6 +94,24 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ── Public Settings (advance %, GST) — no auth required ──────────────────────
+app.get(`${process.env.API_PREFIX || '/api'}/settings/public`, async (req, res, next) => {
+  try {
+    const HotelSettings = require('./models/HotelSettings');
+    const settings = await HotelSettings.getSettings();
+    res.json({
+      success: true,
+      data: {
+        advancePaymentPercent: settings.advancePaymentPercent,
+        cgstPercentage: settings.cgstPercentage,
+        sgstPercentage: settings.sgstPercentage,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── API Routes ────────────────────────────────────────────────────────────────
 const API_PREFIX = process.env.API_PREFIX || '/api';
 

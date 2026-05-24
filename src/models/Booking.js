@@ -18,7 +18,21 @@ const bookingSchema = new mongoose.Schema(
     room: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Room',
-      required: [true, 'Room is required'],
+      default: null,
+      // Assigned by admin/receptionist at check-in; null for online type-based bookings
+    },
+    roomType: {
+      type: String,
+      required: [true, 'Room type is required'],
+      enum: {
+        values: Object.values(require('../constants').ROOM_TYPES),
+        message: `Room type must be one of: ${Object.values(require('../constants').ROOM_TYPES).join(', ')}`,
+      },
+    },
+    pricePerNight: {
+      type: Number,
+      required: [true, 'Price per night is required'],
+      min: [0, 'Price cannot be negative'],
     },
     checkInDate: {
       type: Date,

@@ -26,8 +26,9 @@ const invoiceSchema = new mongoose.Schema(
     room: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Room',
-      required: true,
+      required: false,
     },
+    roomType: { type: String },  // fallback when no specific room assigned yet
     // ── Room charges ──────────────────────────────────────────────────────────
     roomSubtotal: { type: Number, required: true },   // room price × nights (pre-tax)
     // ── Extra charges (food, laundry, etc.) ──────────────────────────────────

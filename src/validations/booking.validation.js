@@ -1,12 +1,12 @@
 'use strict';
 
 const { body, param } = require('express-validator');
-const { PAYMENT_METHOD, BOOKING_SOURCE } = require('../constants');
+const { PAYMENT_METHOD, BOOKING_SOURCE, ROOM_TYPES } = require('../constants');
 
 const createBookingValidation = [
-  body('roomId')
-    .notEmpty().withMessage('Room ID is required')
-    .isMongoId().withMessage('Invalid room ID'),
+  body('roomType')
+    .notEmpty().withMessage('Room type is required')
+    .isIn(Object.values(ROOM_TYPES)).withMessage(`Room type must be one of: ${Object.values(ROOM_TYPES).join(', ')}`),
 
   body('checkInDate')
     .notEmpty().withMessage('Check-in date is required')
@@ -43,7 +43,28 @@ const createBookingValidation = [
 ];
 
 const offlineBookingValidation = [
-  ...createBookingValidation,
+  // Offline bookings use a specific roomId (admin/receptionist picks the exact room)
+  body('roomId')
+    .notEmpty().withMessage('Room ID is required')
+    .isMongoId().withMessage('Invalid room ID'),
+
+  body('checkInDate')
+    .notEmpty().withMessage('Check-in date is required')
+    .isISO8601().withMessage('Check-in must be a valid date'),
+
+  body('checkOutDate')
+    .notEmpty().withMessage('Check-out date is required')
+    .isISO8601().withMessage('Check-out must be a valid date')
+    .custom((value, { req }) => {
+      if (new Date(value) <= new Date(req.body.checkInDate)) {
+        throw new Error('Check-out date must be after check-in date');
+      }
+      return true;
+    }),
+
+  body('guests')
+    .notEmpty().withMessage('Number of guests is required')
+    .isInt({ min: 1, max: 6 }).withMessage('Guests must be between 1 and 6'),
 
   body('source')
     .optional()
@@ -62,6 +83,11 @@ const offlineBookingValidation = [
   body('guestDetails.idProof')
     .optional()
     .trim(),
+
+  body('specialRequests')
+    .optional()
+    .trim()
+    .isLength({ max: 300 }).withMessage('Special requests must not exceed 300 characters'),
 ];
 
 const cancelBookingValidation = [

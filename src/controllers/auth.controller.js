@@ -10,12 +10,21 @@ const register = async (req, res, next) => {
   try {
     const { name, email, password, phone } = req.body;
 
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return sendError(res, 409, 'An account with this email already exists.');
+    // Check phone uniqueness
+    const existingPhone = await User.findOne({ phone });
+    if (existingPhone) {
+      return sendError(res, 409, 'An account with this phone number already exists.');
     }
 
-    const user = await User.create({ name, email, password, phone });
+    // Check email uniqueness only if provided
+    if (email) {
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        return sendError(res, 409, 'An account with this email already exists.');
+      }
+    }
+
+    const user = await User.create({ name, email: email || undefined, password, phone });
 
     const accessToken = generateAccessToken({ id: user._id, role: user.role });
     const refreshToken = generateRefreshToken({ id: user._id });
@@ -24,7 +33,7 @@ const register = async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
-    logger.info(`New user registered: ${email}`);
+    logger.info(`New user registered: ${phone}${email ? ' / ' + email : ''}`);
 
     return sendSuccess(res, 201, 'Registration successful', {
       user,
@@ -39,16 +48,22 @@ const register = async (req, res, next) => {
 // POST /api/auth/login
 const login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    // Accept phone, email, or a generic identifier field
+    const { identifier, phone, email, password } = req.body;
+    const rawId = (identifier || phone || email || '').trim();
 
-    const user = await User.findOne({ email }).select('+password');
+    // Determine if identifier looks like a phone or email
+    const isEmail = rawId.includes('@');
+    const query = isEmail ? { email: rawId } : { phone: rawId };
+
+    const user = await User.findOne(query).select('+password');
     if (!user) {
-      return sendError(res, 401, 'Invalid email or password.');
+      return sendError(res, 401, 'Invalid credentials.');
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      return sendError(res, 401, 'Invalid email or password.');
+      return sendError(res, 401, 'Invalid credentials.');
     }
 
     if (!user.isActive) {
@@ -66,7 +81,7 @@ const login = async (req, res, next) => {
     user.password = undefined;
     user.refreshToken = undefined;
 
-    logger.info(`User logged in: ${email}`);
+    logger.info(`User logged in: ${rawId}`);
 
     return sendSuccess(res, 200, 'Login successful', {
       user,

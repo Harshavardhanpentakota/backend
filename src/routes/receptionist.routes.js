@@ -19,7 +19,10 @@ router.get('/today', getTodayActivity);
 router.get('/bookings', getBookings);
 router.get('/bookings/:bookingId', getBookingDetail);
 router.post('/book', offlineBookingValidation, validate, createOfflineBooking);
-router.post('/checkin', [body('bookingId').notEmpty()], validate, checkIn);
+router.post('/checkin', [
+  body('bookingId').notEmpty().withMessage('bookingId is required'),
+  body('roomId').optional().isMongoId().withMessage('Invalid roomId'),
+], validate, checkIn);
 router.post('/checkout', [body('bookingId').notEmpty()], validate, checkOut);
 router.post(
   '/bookings/:bookingId/charges',

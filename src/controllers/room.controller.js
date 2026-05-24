@@ -181,6 +181,66 @@ const getRoomBookedDates = async (req, res, next) => {
   }
 };
 
+// GET /api/rooms/type-unavailable-dates?type=Suite&year=2026&month=5
+const getTypeUnavailableDates = async (req, res, next) => {
+  try {
+    const { type, year, month } = req.query;
+    if (!type) return sendError(res, 400, 'Room type is required');
+
+    const rooms = await Room.find({ type, isActive: true }).select('_id');
+    const roomIds = rooms.map((r) => r._id);
+    const totalRooms = roomIds.length;
+
+    if (totalRooms === 0) {
+      return sendSuccess(res, 200, 'Unavailable dates fetched', { dates: [] });
+    }
+
+    let startDate, endDate;
+    if (year && month) {
+      startDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+      endDate = new Date(parseInt(year, 10), parseInt(month, 10), 1);
+    } else {
+      startDate = new Date();
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 90);
+    }
+
+    const bookings = await Booking.find({
+      room: { $in: roomIds },
+      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+      checkInDate: { $lt: endDate },
+      checkOutDate: { $gt: startDate },
+    }).select('room checkInDate checkOutDate -_id');
+
+    const fullyBookedDates = [];
+    const cursor = new Date(startDate);
+    while (cursor < endDate) {
+      const dateStart = new Date(cursor);
+      const dateEnd = new Date(cursor);
+      dateEnd.setDate(dateEnd.getDate() + 1);
+
+      const bookedRoomIds = new Set();
+      for (const booking of bookings) {
+        const ci = new Date(booking.checkInDate);
+        const co = new Date(booking.checkOutDate);
+        if (ci < dateEnd && co > dateStart) {
+          bookedRoomIds.add(booking.room.toString());
+        }
+      }
+
+      if (bookedRoomIds.size >= totalRooms) {
+        fullyBookedDates.push(dateStart.toISOString().split('T')[0]);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return sendSuccess(res, 200, 'Unavailable dates fetched', { dates: fullyBookedDates });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // PATCH /api/rooms/:id/status  (admin / receptionist)
 const updateRoomStatus = async (req, res, next) => {
   try {
@@ -207,6 +267,7 @@ module.exports = {
   getAvailableRooms,
   getRoomById,
   getRoomBookedDates,
+  getTypeUnavailableDates,
   createRoom,
   updateRoom,
   deleteRoom,

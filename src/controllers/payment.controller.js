@@ -5,6 +5,7 @@ const Razorpay = require('razorpay');
 const Payment = require('../models/Payment');
 const Booking = require('../models/Booking');
 const Invoice = require('../models/Invoice');
+const HotelSettings = require('../models/HotelSettings');
 const {
   PAYMENT_STATUS, PAYMENT_METHOD, BOOKING_STATUS,
 } = require('../constants');
@@ -35,17 +36,23 @@ const createRazorpayOrder = async (req, res, next) => {
       return sendError(res, 403, 'Access denied');
     }
 
-    if (booking.paymentStatus === PAYMENT_STATUS.PAID) {
-      return sendError(res, 409, 'Booking is already paid');
+    if (booking.advancePaid > 0) {
+      return sendError(res, 409, 'Advance has already been paid for this booking');
     }
 
+    // Calculate advance amount from hotel settings
+    const settings = await HotelSettings.getSettings();
+    const advancePercent = settings.advancePaymentPercent || 10;
+    const advanceAmount = Math.max(1, Math.round(booking.totalAmount * advancePercent / 100));
+
     const order = await getRazorpay().orders.create({
-      amount: Math.round(booking.totalAmount * 100), // paise
+      amount: Math.round(advanceAmount * 100), // paise
       currency: 'INR',
       receipt: booking.bookingId,
       notes: {
         bookingId: booking._id.toString(),
         userId: req.user._id.toString(),
+        advancePercent: String(advancePercent),
       },
     });
 
@@ -55,7 +62,7 @@ const createRazorpayOrder = async (req, res, next) => {
       {
         booking: booking._id,
         user: req.user._id,
-        amount: booking.totalAmount,
+        amount: advanceAmount,
         method: PAYMENT_METHOD.RAZORPAY,
         status: PAYMENT_STATUS.PENDING,
         razorpayOrderId: order.id,
@@ -69,6 +76,8 @@ const createRazorpayOrder = async (req, res, next) => {
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
       bookingId: booking._id,
+      advanceAmount,
+      advancePercent,
       totalAmount: booking.totalAmount,
     });
   } catch (error) {
@@ -107,23 +116,32 @@ const verifyRazorpayPayment = async (req, res, next) => {
 
     if (!payment) return sendError(res, 404, 'Payment record not found');
 
-    // Update booking payment status
+    // Update booking: mark advance as paid, confirm the booking
+    const advancePaid = payment.amount;
     await Booking.findByIdAndUpdate(bookingId, {
-      paymentStatus: PAYMENT_STATUS.PAID,
       status: BOOKING_STATUS.CONFIRMED,
+      advancePaid,
+      advancePaidAt: new Date(),
+      advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
+      // Full paymentStatus stays pending until balance is paid at hotel
     });
 
-    // Generate invoice
+    // Generate invoice (room may be null for type-based bookings)
     const booking = await Booking.findById(bookingId);
     const invoice = await Invoice.create({
       invoiceNumber: generateInvoiceNumber(),
       booking: bookingId,
       payment: payment._id,
       user: req.user._id,
-      room: booking.room,
+      room: booking.room || undefined,
+      roomType: booking.roomType,
+      roomSubtotal: booking.subtotal,
       subtotal: booking.subtotal,
       tax: booking.tax,
       totalAmount: booking.totalAmount,
+      advancePaid,
+      advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
+      balanceDue: booking.totalAmount - advancePaid,
     });
 
     logger.info(`Payment verified for booking ${bookingId} — txn: ${razorpayPaymentId}`);
@@ -171,7 +189,9 @@ const recordOfflinePayment = async (req, res, next) => {
       booking: bookingId,
       payment: payment._id,
       user: booking.user,
-      room: booking.room,
+      room: booking.room || undefined,
+      roomType: booking.roomType,
+      roomSubtotal: booking.subtotal,
       subtotal: booking.subtotal,
       tax: booking.tax,
       totalAmount: booking.totalAmount,
@@ -181,6 +201,120 @@ const recordOfflinePayment = async (req, res, next) => {
     return sendSuccess(res, 201, 'Payment recorded successfully', {
       payment,
       invoiceNumber: invoice.invoiceNumber,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/payments  (admin / receptionist — list all with filters)
+const getAllPayments = async (req, res, next) => {
+  try {
+    const {
+      page = 1, limit = 20, status, method, startDate, endDate, search,
+    } = req.query;
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (method) filter.method = method;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    let query = Payment.find(filter)
+      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status')
+      .populate('user', 'name email phone')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const [payments, total] = await Promise.all([
+      query,
+      Payment.countDocuments(filter),
+    ]);
+
+    // Client-side search on populated fields (booking ID / guest name)
+    let results = payments;
+    if (search) {
+      const q = search.toLowerCase();
+      results = payments.filter((p) => {
+        const bookingId = (p.booking?.bookingId ?? '').toLowerCase();
+        const guestName = (p.user?.name ?? '').toLowerCase();
+        const guestPhone = (p.user?.phone ?? '').toLowerCase();
+        const txn = (p.transactionId ?? '').toLowerCase();
+        return bookingId.includes(q) || guestName.includes(q) || guestPhone.includes(q) || txn.includes(q);
+      });
+    }
+
+    return sendSuccess(res, 200, 'Payments fetched', results, {
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      pages: Math.ceil(total / parseInt(limit)),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/payments/:id/refund  (admin / receptionist)
+const refundPayment = async (req, res, next) => {
+  try {
+    const payment = await Payment.findById(req.params.id).populate('booking');
+    if (!payment) return sendError(res, 404, 'Payment not found');
+
+    if (payment.status !== PAYMENT_STATUS.PAID) {
+      return sendError(res, 400, `Cannot refund a payment with status "${payment.status}"`);
+    }
+
+    const { reason = 'Refund initiated by staff', refundAmount } = req.body;
+    const amount = refundAmount ? Math.min(Number(refundAmount), payment.amount) : payment.amount;
+
+    let refundId = null;
+
+    // Online payment — trigger Razorpay refund
+    if (payment.method === PAYMENT_METHOD.RAZORPAY && payment.razorpayPaymentId) {
+      try {
+        const rzRefund = await getRazorpay().payments.refund(payment.razorpayPaymentId, {
+          amount: Math.round(amount * 100), // paise
+          notes: { reason },
+        });
+        refundId = rzRefund.id;
+      } catch (rzErr) {
+        logger.error('Razorpay refund error:', rzErr.message);
+        return sendError(res, 502, `Razorpay refund failed: ${rzErr.error?.description ?? rzErr.message}`);
+      }
+    }
+
+    const isPartial = amount < payment.amount;
+    const newStatus = isPartial ? PAYMENT_STATUS.PARTIALLY_REFUNDED : PAYMENT_STATUS.REFUNDED;
+
+    await Payment.findByIdAndUpdate(req.params.id, {
+      status: newStatus,
+      refundId,
+      refundAmount: amount,
+      refundDate: new Date(),
+      notes: reason,
+    });
+
+    // Update booking payment status
+    await Booking.findByIdAndUpdate(payment.booking._id ?? payment.booking, {
+      paymentStatus: newStatus,
+    });
+
+    logger.info(`Refund of ₹${amount} processed for payment ${req.params.id} by ${req.user._id}`);
+    return sendSuccess(res, 200, 'Refund processed successfully', {
+      refundId,
+      refundAmount: amount,
+      status: newStatus,
     });
   } catch (error) {
     next(error);
@@ -206,4 +340,4 @@ const getPaymentByBooking = async (req, res, next) => {
   }
 };
 
-module.exports = { createRazorpayOrder, verifyRazorpayPayment, recordOfflinePayment, getPaymentByBooking };
+module.exports = { createRazorpayOrder, verifyRazorpayPayment, recordOfflinePayment, getPaymentByBooking, getAllPayments, refundPayment };

@@ -30,28 +30,24 @@ const isRoomAvailable = async (roomId, checkIn, checkOut, excludeBookingId = nul
 // POST /api/bookings
 const createBooking = async (req, res, next) => {
   try {
-    const { roomId, checkInDate, checkOutDate, guests, specialRequests, paymentMethod } = req.body;
+    const { roomType, checkInDate, checkOutDate, guests, specialRequests, paymentMethod } = req.body;
 
     const checkIn = new Date(checkInDate);
     const checkOut = new Date(checkOutDate);
 
-    const room = await Room.findById(roomId);
-    if (!room || !room.isActive) return sendError(res, 404, 'Room not found');
-    if (room.status === ROOM_STATUS.MAINTENANCE) {
-      return sendError(res, 409, 'Room is currently under maintenance');
+    // Find any active room of this type to get the standard price
+    const sampleRoom = await Room.findOne({ type: roomType, isActive: true });
+    if (!sampleRoom) {
+      return sendError(res, 404, `No rooms of type "${roomType}" are currently available`);
     }
 
-    if (guests > room.capacity) {
-      return sendError(res, 400, `Room capacity is ${room.capacity} guests`);
-    }
-
-    const available = await isRoomAvailable(roomId, checkIn, checkOut);
-    if (!available) {
-      return sendError(res, 409, 'Room is not available for the selected dates');
+    if (guests > sampleRoom.capacity) {
+      return sendError(res, 400, `Room capacity for ${roomType} is ${sampleRoom.capacity} guests`);
     }
 
     const nights = calculateNights(checkIn, checkOut);
-    const baseAmount = room.price * nights;
+    const pricePerNight = sampleRoom.price;
+    const baseAmount = pricePerNight * nights;
     const { subtotal, tax, totalAmount } = addGST(baseAmount);
 
     const bookingId = generateBookingId();
@@ -59,7 +55,9 @@ const createBooking = async (req, res, next) => {
     const booking = await Booking.create({
       bookingId,
       user: req.user._id,
-      room: roomId,
+      room: null,          // Assigned by admin at check-in
+      roomType,
+      pricePerNight,
       checkInDate: checkIn,
       checkOutDate: checkOut,
       guests,
@@ -67,23 +65,21 @@ const createBooking = async (req, res, next) => {
       subtotal,
       tax,
       totalAmount,
-      status: BOOKING_STATUS.CONFIRMED,
+      status: BOOKING_STATUS.PENDING,   // confirmed only after advance payment
       source: BOOKING_SOURCE.ONLINE,
       specialRequests,
     });
 
     // Send confirmation email (non-blocking)
     try {
-      const emailData = bookingConfirmationEmail(booking, req.user, room);
+      const emailData = bookingConfirmationEmail(booking, req.user, sampleRoom);
       await sendEmail(emailData);
     } catch (emailErr) {
       logger.warn(`Booking confirmation email failed: ${emailErr.message}`);
     }
 
-    const populated = await booking.populate('room', 'roomNumber type price floor amenities');
-
-    logger.info(`Booking created: ${bookingId} by user ${req.user._id}`);
-    return sendSuccess(res, 201, 'Booking created successfully', populated);
+    logger.info(`Booking created: ${bookingId} by user ${req.user._id} (type: ${roomType})`);
+    return sendSuccess(res, 201, 'Booking created successfully', booking);
   } catch (error) {
     next(error);
   }
