@@ -10,13 +10,18 @@ const logger = require('../utils/logger');
  */
 const authenticate = async (req, res, next) => {
   try {
+    let token;
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return sendError(res, 401, 'Authentication required. Please provide a valid token.');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query.token) {
+      token = req.query.token;
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return sendError(res, 401, 'Authentication required. Please provide a valid token.');
+    }
 
     let decoded;
     try {

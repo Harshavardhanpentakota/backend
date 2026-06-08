@@ -5,6 +5,8 @@ const Booking = require('../models/Booking');
 const { sendSuccess, sendError, paginationMeta } = require('../utils/response');
 const { parsePagination } = require('../utils/helpers');
 const { BOOKING_STATUS, ROOM_STATUS } = require('../constants');
+const { getRoomTypeAvailability } = require('../utils/availability');
+const { logActivity } = require('../utils/activity');
 
 // GET /api/rooms  — list rooms with filtering, search, pagination
 const getRooms = async (req, res, next) => {
@@ -34,7 +36,7 @@ const getRooms = async (req, res, next) => {
       const checkOutDate = new Date(checkOut);
       if (checkOutDate > checkInDate) {
         const bookedRoomIds = await Booking.find({
-          status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+          status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
           checkInDate: { $lt: checkOutDate },
           checkOutDate: { $gt: checkInDate },
         }).distinct('room');
@@ -71,7 +73,7 @@ const getAvailableRooms = async (req, res, next) => {
 
     // Find all rooms that have conflicting bookings
     const conflictingBookings = await Booking.find({
-      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
       $or: [
         { checkInDate: { $lt: checkOutDate }, checkOutDate: { $gt: checkInDate } },
       ],
@@ -114,7 +116,32 @@ const getRoomById = async (req, res, next) => {
 // POST /api/rooms  (admin only)
 const createRoom = async (req, res, next) => {
   try {
+    // Auto-fill price based on room type if not provided
+    if (req.body.price === undefined || req.body.price === null || req.body.price === '') {
+      const existing = await Room.findOne({ type: req.body.type, isActive: true });
+      if (existing) {
+        req.body.price = existing.price;
+      } else {
+        const defaults = {
+          'Deluxe Non AC': 1800,
+          'Deluxe AC': 2800,
+          'Suite': 5400,
+        };
+        req.body.price = defaults[req.body.type] || 2000;
+      }
+    }
     const room = await Room.create(req.body);
+
+    await logActivity({
+      req,
+      action: 'Room Created',
+      module: 'Rooms',
+      entityId: room._id.toString(),
+      entityType: 'Room',
+      description: `Room ${room.roomNumber} created.`,
+      newData: room.toObject()
+    });
+
     return sendSuccess(res, 201, 'Room created successfully', room);
   } catch (error) {
     next(error);
@@ -124,11 +151,24 @@ const createRoom = async (req, res, next) => {
 // PUT /api/rooms/:id  (admin only)
 const updateRoom = async (req, res, next) => {
   try {
+    const oldRoom = await Room.findById(req.params.id);
     const room = await Room.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
     });
     if (!room) return sendError(res, 404, 'Room not found');
+
+    await logActivity({
+      req,
+      action: 'Room Updated',
+      module: 'Rooms',
+      entityId: room._id.toString(),
+      entityType: 'Room',
+      description: `Room ${room.roomNumber} updated.`,
+      previousData: oldRoom ? oldRoom.toObject() : null,
+      newData: room.toObject()
+    });
+
     return sendSuccess(res, 200, 'Room updated successfully', room);
   } catch (error) {
     next(error);
@@ -148,6 +188,7 @@ const deleteRoom = async (req, res, next) => {
       return sendError(res, 409, 'Cannot delete room with active bookings');
     }
 
+    const oldRoom = await Room.findById(req.params.id);
     const room = await Room.findByIdAndUpdate(
       req.params.id,
       { isActive: false, status: ROOM_STATUS.MAINTENANCE },
@@ -155,6 +196,16 @@ const deleteRoom = async (req, res, next) => {
     );
 
     if (!room) return sendError(res, 404, 'Room not found');
+
+    await logActivity({
+      req,
+      action: 'Room Deleted',
+      module: 'Rooms',
+      entityId: req.params.id,
+      entityType: 'Room',
+      description: `Room deleted: ${oldRoom ? oldRoom.roomNumber : req.params.id}`
+    });
+
     return sendSuccess(res, 200, 'Room deleted successfully');
   } catch (error) {
     next(error);
@@ -171,7 +222,7 @@ const getRoomBookedDates = async (req, res, next) => {
 
     const bookings = await Booking.find({
       room: req.params.id,
-      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
       checkOutDate: { $gte: new Date() },
     }).select('checkInDate checkOutDate -_id');
 
@@ -208,7 +259,7 @@ const getTypeUnavailableDates = async (req, res, next) => {
 
     const bookings = await Booking.find({
       room: { $in: roomIds },
-      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
       checkInDate: { $lt: endDate },
       checkOutDate: { $gt: startDate },
     }).select('room checkInDate checkOutDate -_id');
@@ -241,6 +292,49 @@ const getTypeUnavailableDates = async (req, res, next) => {
   }
 };
 
+// GET /api/rooms/:roomType/availability
+const getRoomTypeAvailabilityAPI = async (req, res, next) => {
+  try {
+    const { roomType } = req.params;
+    const { checkIn, checkOut, year, month } = req.query;
+
+    let startDate, endDate;
+    if (year && month) {
+      startDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+      endDate = new Date(parseInt(year, 10), parseInt(month, 10), 1);
+    } else if (checkIn) {
+      startDate = new Date(checkIn);
+      if (checkOut) {
+        endDate = new Date(checkOut);
+      } else {
+        endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 90);
+      }
+    } else {
+      startDate = new Date();
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 90);
+    }
+
+    if (endDate <= startDate) {
+      return sendError(res, 400, 'Check-out/End date must be after check-in/Start date');
+    }
+
+    const availability = await getRoomTypeAvailability(roomType, startDate, endDate);
+    
+    return sendSuccess(res, 200, 'Availability calculated successfully', {
+      roomType: availability.roomType,
+      inventory: availability.inventory,
+      available: availability.available,
+      fullyBookedDates: availability.fullyBookedDates,
+      limitedAvailabilityDates: availability.limitedAvailabilityDates,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // PATCH /api/rooms/:id/status  (admin / receptionist)
 const updateRoomStatus = async (req, res, next) => {
   try {
@@ -249,6 +343,7 @@ const updateRoomStatus = async (req, res, next) => {
       return sendError(res, 400, 'Invalid room status');
     }
 
+    const oldRoom = await Room.findById(req.params.id);
     const room = await Room.findByIdAndUpdate(
       req.params.id,
       { status },
@@ -256,6 +351,18 @@ const updateRoomStatus = async (req, res, next) => {
     );
 
     if (!room) return sendError(res, 404, 'Room not found');
+
+    await logActivity({
+      req,
+      action: 'Room Status Changed',
+      module: 'Rooms',
+      entityId: room._id.toString(),
+      entityType: 'Room',
+      description: `Room ${room.roomNumber} status changed from ${oldRoom ? oldRoom.status : 'unknown'} to ${status}. Room marked ${status === 'available' ? 'available' : 'unavailable'}.`,
+      previousData: oldRoom ? { status: oldRoom.status } : null,
+      newData: { status }
+    });
+
     return sendSuccess(res, 200, 'Room status updated', room);
   } catch (error) {
     next(error);
@@ -268,6 +375,7 @@ module.exports = {
   getRoomById,
   getRoomBookedDates,
   getTypeUnavailableDates,
+  getRoomTypeAvailabilityAPI,
   createRoom,
   updateRoom,
   deleteRoom,

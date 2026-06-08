@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const { sendSuccess, sendError } = require('../utils/response');
 const logger = require('../utils/logger');
+const { logActivity } = require('../utils/activity');
 
 // POST /api/auth/register
 const register = async (req, res, next) => {
@@ -81,6 +82,16 @@ const login = async (req, res, next) => {
     user.password = undefined;
     user.refreshToken = undefined;
 
+    await logActivity({
+      req,
+      userId: user._id,
+      userName: user.name,
+      role: user.role,
+      action: 'Login',
+      module: 'Authentication',
+      description: `${user.name} logged in successfully.`
+    });
+
     logger.info(`User logged in: ${rawId}`);
 
     return sendSuccess(res, 200, 'Login successful', {
@@ -131,6 +142,12 @@ const refreshToken = async (req, res, next) => {
 // POST /api/auth/logout
 const logout = async (req, res, next) => {
   try {
+    await logActivity({
+      req,
+      action: 'Logout',
+      module: 'Authentication',
+      description: `${req.user.name} logged out.`
+    });
     await User.findByIdAndUpdate(req.user._id, { $unset: { refreshToken: '' } });
     return sendSuccess(res, 200, 'Logged out successfully');
   } catch (error) {
@@ -156,6 +173,13 @@ const changePassword = async (req, res, next) => {
 
     user.password = newPassword;
     await user.save();
+
+    await logActivity({
+      req,
+      action: 'Password Change',
+      module: 'Authentication',
+      description: `${req.user.name} changed password.`
+    });
 
     logger.info(`Password changed for user: ${user.email}`);
     return sendSuccess(res, 200, 'Password changed successfully');

@@ -6,9 +6,10 @@ const {
   getDashboard, getRevenueReport, getOccupancyReport, getBookingsByRoomType,
   getStaff, createStaff, updateStaff, deleteStaff,
   getUsers, updateBookingStatus,
-  getRoomsAdmin, updateRoomAdmin,
+  getRoomsAdmin, updateRoomAdmin, updateRoomPricing,
   getActiveGuests, changeGuestRoom,
   getSettings, updateSettings,
+  getActivityLogs, exportActivityLogs,
 } = require('../controllers/admin.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
 const { ROLES } = require('../constants');
@@ -35,6 +36,10 @@ router.get('/reports/revenue', getRevenueReport);
 router.get('/reports/occupancy', getOccupancyReport);
 router.get('/reports/bookings-by-room-type', getBookingsByRoomType);
 
+// Activity logs
+router.get('/activity-logs', getActivityLogs);
+router.get('/activity-logs/export', exportActivityLogs);
+
 // Staff management
 router.get('/staff', getStaff);
 router.post('/staff', createStaff);
@@ -45,6 +50,7 @@ router.delete('/staff/:id', [param('id').isMongoId()], validate, deleteStaff);
 router.patch('/bookings/:id/status', [param('id').isMongoId(), body('status').notEmpty()], validate, updateBookingStatus);
 
 // Room mutations (admin-only)
+router.patch('/rooms/pricing', updateRoomPricing);
 router.patch('/rooms/:id', [param('id').isMongoId()], validate, updateRoomAdmin);
 
 // Hotel settings

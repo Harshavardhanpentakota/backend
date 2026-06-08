@@ -14,6 +14,9 @@ const {
 } = require('../utils/helpers');
 const { sendEmail, bookingConfirmationEmail, cancellationEmail } = require('../utils/email');
 const logger = require('../utils/logger');
+const { getRoomTypeAvailability, acquireLock } = require('../utils/availability');
+const { createNotification } = require('../utils/notification');
+const { logActivity } = require('../utils/activity');
 
 // ── Helper: check room availability ──────────────────────────────────────────
 const isRoomAvailable = async (roomId, checkIn, checkOut, excludeBookingId = null) => {
@@ -29,9 +32,9 @@ const isRoomAvailable = async (roomId, checkIn, checkOut, excludeBookingId = nul
 
 // POST /api/bookings
 const createBooking = async (req, res, next) => {
+  const { roomType, checkInDate, checkOutDate, guests, specialRequests, paymentMethod } = req.body;
+  const release = acquireLock(roomType);
   try {
-    const { roomType, checkInDate, checkOutDate, guests, specialRequests, paymentMethod } = req.body;
-
     const checkIn = new Date(checkInDate);
     const checkOut = new Date(checkOutDate);
 
@@ -43,6 +46,12 @@ const createBooking = async (req, res, next) => {
 
     if (guests > sampleRoom.capacity) {
       return sendError(res, 400, `Room capacity for ${roomType} is ${sampleRoom.capacity} guests`);
+    }
+
+    // Availability Engine check
+    const availability = await getRoomTypeAvailability(roomType, checkIn, checkOut);
+    if (availability.available < 1) {
+      return sendError(res, 400, 'Selected room type is no longer available for the selected dates.');
     }
 
     const nights = calculateNights(checkIn, checkOut);
@@ -78,10 +87,48 @@ const createBooking = async (req, res, next) => {
       logger.warn(`Booking confirmation email failed: ${emailErr.message}`);
     }
 
+    // Notify User, Reception, Admin
+    await createNotification({
+      recipientId: req.user._id,
+      title: 'Booking Created',
+      message: `Your booking #${booking.bookingId} has been created and is pending confirmation.`,
+      type: 'booking_created',
+      metadata: { bookingId: booking._id, bookingIdStr: booking.bookingId }
+    });
+
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'New Booking Created',
+      message: `New booking #${booking.bookingId} created by ${req.user.name}.`,
+      type: 'new_booking_created',
+      metadata: { bookingId: booking._id, bookingIdStr: booking.bookingId }
+    });
+
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'New Booking Created',
+      message: `New booking #${booking.bookingId} created by ${req.user.name}.`,
+      type: 'new_booking_created',
+      metadata: { bookingId: booking._id, bookingIdStr: booking.bookingId }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Booking Created',
+      module: 'Bookings',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `New online booking #${booking.bookingId} created by ${req.user.name}`,
+      newData: booking.toObject()
+    });
+
     logger.info(`Booking created: ${bookingId} by user ${req.user._id} (type: ${roomType})`);
     return sendSuccess(res, 201, 'Booking created successfully', booking);
   } catch (error) {
     next(error);
+  } finally {
+    release();
   }
 };
 
@@ -195,6 +242,34 @@ const cancelBooking = async (req, res, next) => {
     } catch (emailErr) {
       logger.warn(`Cancellation email failed: ${emailErr.message}`);
     }
+
+    // Notify User, Reception
+    await createNotification({
+      recipientId: booking.user._id,
+      title: 'Booking Cancelled',
+      message: `Your booking #${booking.bookingId} has been cancelled. Refund: ₹${refundAmount}.`,
+      type: 'booking_cancelled',
+      metadata: { booking, refundAmount }
+    });
+
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Booking Cancelled',
+      message: `Booking #${booking.bookingId} has been cancelled.`,
+      type: 'booking_cancelled',
+      metadata: { booking }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Booking Cancelled',
+      module: 'Bookings',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Booking #${booking.bookingId} cancelled. Refund: ₹${refundAmount}`,
+      newData: { status: BOOKING_STATUS.CANCELLED, refundAmount }
+    });
 
     logger.info(`Booking cancelled: ${booking.bookingId} — refund: ₹${refundAmount}`);
     return sendSuccess(res, 200, 'Booking cancelled successfully', {

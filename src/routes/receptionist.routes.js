@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   createOfflineBooking, getBookingDetail, checkIn, checkOut,
   addExtraCharge, removeExtraCharge, getTodayActivity,
+  getAssignableRooms,
 } = require('../controllers/receptionist.controller');
 const { getBookings } = require('../controllers/booking.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
@@ -18,6 +19,7 @@ router.use(authenticate, authorize(ROLES.ADMIN, ROLES.RECEPTIONIST));
 router.get('/today', getTodayActivity);
 router.get('/bookings', getBookings);
 router.get('/bookings/:bookingId', getBookingDetail);
+router.get('/bookings/:bookingId/assignable-rooms', getAssignableRooms);
 router.post('/book', offlineBookingValidation, validate, createOfflineBooking);
 router.post('/checkin', [
   body('bookingId').notEmpty().withMessage('bookingId is required'),

@@ -30,6 +30,11 @@ const roomSchema = new mongoose.Schema(
       required: [true, 'Price is required'],
       min: [0, 'Price cannot be negative'],
     },
+    customPrice: {
+      type: Number,
+      min: [0, 'Custom price cannot be negative'],
+      default: undefined,
+    },
     capacity: {
       type: Number,
       required: [true, 'Capacity is required'],

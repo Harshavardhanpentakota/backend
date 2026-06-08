@@ -17,7 +17,7 @@ const createRoomValidation = [
     .isIn(Object.values(ROOM_TYPES)).withMessage(`Type must be one of: ${Object.values(ROOM_TYPES).join(', ')}`),
 
   body('price')
-    .notEmpty().withMessage('Price is required')
+    .optional()
     .isFloat({ min: 0 }).withMessage('Price must be a non-negative number'),
 
   body('capacity')

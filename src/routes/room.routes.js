@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getRooms, getAvailableRooms, getRoomById, getRoomBookedDates,
-  getTypeUnavailableDates,
+  getTypeUnavailableDates, getRoomTypeAvailabilityAPI,
   createRoom, updateRoom, deleteRoom, updateRoomStatus,
 } = require('../controllers/room.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
@@ -21,6 +21,7 @@ router.get('/available', roomAvailabilityValidation, validate, getAvailableRooms
 router.get('/type-unavailable-dates', [
   require('express-validator').query('type').notEmpty().withMessage('type is required'),
 ], validate, getTypeUnavailableDates);
+router.get('/:roomType/availability', getRoomTypeAvailabilityAPI);
 router.get('/:id/booked-dates', [param('id').isMongoId().withMessage('Invalid room ID')], validate, getRoomBookedDates);
 router.get('/:id', [param('id').isMongoId().withMessage('Invalid room ID')], validate, getRoomById);
 

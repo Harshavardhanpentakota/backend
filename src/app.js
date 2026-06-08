@@ -41,6 +41,7 @@ const receptionistRoutes = require('./routes/receptionist.routes');
 const staffRoutes = require('./routes/staff.routes');
 const serviceRoutes = require('./routes/service.routes');
 const restaurantRoutes = require('./routes/restaurant.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 const app = express();
 
@@ -126,6 +127,7 @@ app.use(`${API_PREFIX}/reception`, receptionistRoutes);
 app.use(`${API_PREFIX}/staff`, staffRoutes);
 app.use(`${API_PREFIX}/services`, serviceRoutes);
 app.use(`${API_PREFIX}/restaurant`, restaurantRoutes);
+app.use(`${API_PREFIX}/notifications`, notificationRoutes);
 
 // ── 404 & Error Handlers ──────────────────────────────────────────────────────
 app.use(notFound);

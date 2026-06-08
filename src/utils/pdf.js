@@ -94,7 +94,7 @@ const generateInvoicePDF = (invoiceData, outputStream) => {
   const total = invoice.totalAmount || booking.totalAmount;
 
   const rows = [
-    [`Room rate (₹${room.price}/night × ${nights} nights)`, `₹${subtotal.toFixed(2)}`],
+    [`Room rate (₹${booking.pricePerNight || room.price}/night × ${nights} nights)`, `₹${subtotal.toFixed(2)}`],
     [`GST (${HOTEL.GST_PERCENTAGE || 12}%)`, `₹${tax.toFixed(2)}`],
   ];
 

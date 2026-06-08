@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const Booking = require('../models/Booking');
 const Room = require('../models/Room');
@@ -13,6 +13,8 @@ const {
   generateBookingId, generateInvoiceNumber, calculateNights,
 } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { createNotification } = require('../utils/notification');
+const { logActivity } = require('../utils/activity');
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -72,7 +74,7 @@ const createOfflineBooking = async (req, res, next) => {
 
     const conflict = await Booking.findOne({
       room: roomId,
-      status: { $in: [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.PENDING] },
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
       $or: [{ checkInDate: { $lt: checkOut }, checkOutDate: { $gt: checkIn } }],
     });
     if (conflict) return sendError(res, 409, 'Room is not available for the selected dates');
@@ -92,14 +94,15 @@ const createOfflineBooking = async (req, res, next) => {
     }
 
     const nights = calculateNights(checkIn, checkOut);
-    const subtotal = room.price * nights;
+    const effectivePrice = room.customPrice ?? room.price;
+    const subtotal = effectivePrice * nights;
 
     const booking = await Booking.create({
       bookingId: generateBookingId(),
       user: guestUser?._id || req.user._id,
       room: roomId,
       roomType: room.type,
-      pricePerNight: room.price,
+      pricePerNight: effectivePrice,
       checkInDate: checkIn,
       checkOutDate: checkOut,
       guests,
@@ -112,6 +115,45 @@ const createOfflineBooking = async (req, res, next) => {
       createdBy: req.user._id,
       guestDetails,
       specialRequests,
+    });
+
+    // Notify User (if they exist)
+    if (guestUser) {
+      await createNotification({
+        recipientId: guestUser._id,
+        title: 'Booking Confirmed',
+        message: `Your booking #${booking.bookingId} has been confirmed.`,
+        type: 'booking_confirmed',
+        metadata: { booking }
+      });
+    }
+
+    // Notify Reception & Admin
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'New Booking Created',
+      message: `New offline booking #${booking.bookingId} created by ${req.user.name}.`,
+      type: 'new_booking_created',
+      metadata: { booking }
+    });
+
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'New Booking Created',
+      message: `New offline booking #${booking.bookingId} created by ${req.user.name}.`,
+      type: 'new_booking_created',
+      metadata: { booking }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Booking Created',
+      module: 'Bookings',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Offline booking #${booking.bookingId} created by ${req.user.name}`,
+      newData: booking.toObject()
     });
 
     logger.info(`Offline booking created: ${booking.bookingId} by ${req.user._id}`);
@@ -147,33 +189,62 @@ const checkIn = async (req, res, next) => {
       return sendError(res, 409, `Cannot check in - booking status is: ${booking.status}`);
     }
 
+    // Find available rooms for booking dates
+    const rooms = await Room.find({ type: booking.roomType, isActive: true });
+    const conflictingBookings = await Booking.find({
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
+      _id: { $ne: booking._id },
+      checkInDate: { $lt: booking.checkOutDate },
+      checkOutDate: { $gt: booking.checkInDate },
+      room: { $ne: null }
+    });
+    const allocatedRoomIds = conflictingBookings.map(b => b.room.toString());
+
+    const assignableRooms = rooms.filter(room => {
+      if (room.status === ROOM_STATUS.OCCUPIED) return false;
+      if (room.status === ROOM_STATUS.MAINTENANCE) return false;
+      if (allocatedRoomIds.includes(room._id.toString())) return false;
+      return true;
+    });
+
+    if (assignableRooms.length === 0) {
+      return sendError(res, 400, 'No rooms available for assignment.');
+    }
+
     // If booking has no room assigned yet (type-based online booking), assign now
     if (!booking.room) {
       if (!roomId) {
         return sendError(res, 400, 'A room must be assigned before check-in. Please provide roomId.');
       }
-      const assignedRoom = await Room.findById(roomId);
-      if (!assignedRoom || !assignedRoom.isActive) {
-        return sendError(res, 404, 'Room not found');
+      const isAssignable = assignableRooms.some(r => r._id.toString() === roomId.toString());
+      if (!isAssignable) {
+        const targetRoom = await Room.findById(roomId);
+        if (targetRoom && targetRoom.status === ROOM_STATUS.OCCUPIED) {
+          return sendError(res, 409, 'Selected room is currently occupied');
+        }
+        return sendError(res, 409, 'Selected room is not available for this booking dates');
       }
-      if (assignedRoom.type !== booking.roomType) {
-        return sendError(res, 400, `Room type mismatch: booking requires "${booking.roomType}" but selected room is "${assignedRoom.type}"`);
-      }
-      if (assignedRoom.status === ROOM_STATUS.MAINTENANCE) {
-        return sendError(res, 409, 'Selected room is under maintenance');
-      }
-      const conflict = await Booking.findOne({
-        room: roomId,
-        status: BOOKING_STATUS.CHECKED_IN,
-        _id: { $ne: booking._id },
-      });
-      if (conflict) return sendError(res, 409, 'Selected room is currently occupied');
       booking.room = roomId;
     }
 
     await booking.populate('room');
 
     const settings = await HotelSettings.getSettings();
+    const assignedRoom = booking.room;
+    const effectivePrice = assignedRoom.customPrice ?? assignedRoom.price;
+    const subtotal = effectivePrice * booking.nights;
+    const cgstPct = settings.cgstPercentage || 6;
+    const sgstPct = settings.sgstPercentage || 6;
+    const cgst = Math.round(subtotal * cgstPct) / 100;
+    const sgst = Math.round(subtotal * sgstPct) / 100;
+    const tax = cgst + sgst;
+    const totalAmount = subtotal + tax;
+
+    booking.pricePerNight = effectivePrice;
+    booking.subtotal = subtotal;
+    booking.tax = tax;
+    booking.totalAmount = totalAmount;
+
     const advancePct = settings.advancePaymentPercent;
     const advancePaid = Math.round((booking.subtotal * advancePct) / 100);
 
@@ -185,6 +256,45 @@ const checkIn = async (req, res, next) => {
     await booking.save();
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
+
+    // Notify User
+    if (booking.user) {
+      await createNotification({
+        recipientId: booking.user,
+        title: 'Checked In Successfully',
+        message: `You have successfully checked into Room ${booking.room.roomNumber || ''}.`,
+        type: 'booking_checked_in',
+        metadata: { booking, roomNumber: booking.room.roomNumber }
+      });
+    }
+
+    // Notify Reception & Admin
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Guest Checked In',
+      message: `Guest checked in for Booking #${booking.bookingId} in Room ${booking.room.roomNumber}.`,
+      type: 'guest_checked_in',
+      metadata: { booking }
+    });
+
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'Guest Checked In',
+      message: `Guest checked in for Booking #${booking.bookingId} in Room ${booking.room.roomNumber}.`,
+      type: 'guest_checked_in',
+      metadata: { booking }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Check-In Created',
+      module: 'Check-In',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Guest checked in for Booking #${booking.bookingId} (Room ${booking.room.roomNumber})`,
+      newData: { status: booking.status, room: booking.room._id }
+    });
 
     logger.info(`Check-in: ${bookingId} | Room: ${booking.room.roomNumber} | Advance paid`);
     return sendSuccess(res, 200, 'Guest checked in successfully', {
@@ -226,6 +336,17 @@ const addExtraCharge = async (req, res, next) => {
     const settings = await HotelSettings.getSettings();
     const invoicePreview = buildInvoiceData(booking, settings);
 
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Additional Charges Added',
+      module: 'Check-Out',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Added charge: ${description} (₹${amount}) to Booking #${booking.bookingId}`,
+      newData: { description, amount, category }
+    });
+
     logger.info(`Extra charge added to ${bookingId}: ${description} â‚¹${amount}`);
     return sendSuccess(res, 200, 'Charge added', { extraCharges: booking.extraCharges, invoicePreview });
   } catch (error) {
@@ -251,6 +372,16 @@ const removeExtraCharge = async (req, res, next) => {
 
     const settings = await HotelSettings.getSettings();
     const invoicePreview = buildInvoiceData(booking, settings);
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Additional Charges Removed',
+      module: 'Check-Out',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Removed extra charge from Booking #${booking.bookingId}`
+    });
 
     return sendSuccess(res, 200, 'Charge removed', { extraCharges: booking.extraCharges, invoicePreview });
   } catch (error) {
@@ -301,6 +432,45 @@ const checkOut = async (req, res, next) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // Notify User
+    if (booking.user?._id) {
+      await createNotification({
+        recipientId: booking.user._id,
+        title: 'Checked Out Successfully',
+        message: `Your stay for Booking #${booking.bookingId} has checked out. Thank you for choosing us!`,
+        type: 'booking_checked_out',
+        metadata: { booking }
+      });
+    }
+
+    // Notify Admin & Reception
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'Guest Checked Out',
+      message: `Guest checked out from Room ${booking.room.roomNumber} for Booking #${booking.bookingId}.`,
+      type: 'guest_checked_out',
+      metadata: { booking }
+    });
+
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Guest Checked Out',
+      message: `Guest checked out from Room ${booking.room.roomNumber} for Booking #${booking.bookingId}.`,
+      type: 'guest_checked_out',
+      metadata: { booking }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Check-Out Completed',
+      module: 'Check-Out',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Guest checked out from Room ${booking.room.roomNumber} for Booking #${booking.bookingId}. Invoice generated.`,
+      newData: { status: booking.status, totalAmount: booking.totalAmount, invoiceNumber: invoiceDoc.invoiceNumber }
+    });
+
     logger.info(`Check-out: ${bookingId} | Invoice: ${invoiceDoc.invoiceNumber} | Total: â‚¹${inv.totalAmount}`);
 
     return sendSuccess(res, 200, 'Guest checked out successfully', {
@@ -350,6 +520,40 @@ const getTodayActivity = async (req, res, next) => {
   }
 };
 
+const getAssignableRooms = async (req, res, next) => {
+  try {
+    const { bookingId } = req.params;
+    const booking = await Booking.findOne({ $or: [{ bookingId }, { _id: req.params.bookingId }] });
+    if (!booking) return sendError(res, 404, 'Booking not found');
+
+    const checkInDate = booking.checkInDate;
+    const checkOutDate = booking.checkOutDate;
+    const roomType = booking.roomType;
+
+    const rooms = await Room.find({ type: roomType, isActive: true });
+
+    const conflictingBookings = await Booking.find({
+      status: { $in: ['confirmed', 'allocated', 'paid', 'checked_in'] },
+      _id: { $ne: booking._id },
+      checkInDate: { $lt: checkOutDate },
+      checkOutDate: { $gt: checkInDate },
+      room: { $ne: null }
+    });
+    const allocatedRoomIds = conflictingBookings.map(b => b.room.toString());
+
+    const assignableRooms = rooms.filter(room => {
+      if (room.status === ROOM_STATUS.OCCUPIED) return false;
+      if (room.status === ROOM_STATUS.MAINTENANCE) return false;
+      if (allocatedRoomIds.includes(room._id.toString())) return false;
+      return true;
+    });
+
+    return sendSuccess(res, 200, 'Assignable rooms fetched successfully', assignableRooms);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createOfflineBooking,
   getBookingDetail,
@@ -358,4 +562,5 @@ module.exports = {
   addExtraCharge,
   removeExtraCharge,
   getTodayActivity,
+  getAssignableRooms,
 };

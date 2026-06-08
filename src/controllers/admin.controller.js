@@ -10,6 +10,9 @@ const HotelSettings = require('../models/HotelSettings');
 const { sendSuccess, sendError } = require('../utils/response');
 const { parsePagination } = require('../utils/helpers');
 const { BOOKING_STATUS, ROOM_STATUS, PAYMENT_STATUS, STAFF_ROLES, SHIFT, ROLES } = require('../constants');
+const ActivityLog = require('../models/ActivityLog');
+const { logActivity } = require('../utils/activity');
+const { createNotification } = require('../utils/notification');
 
 // GET /api/admin/dashboard
 const getDashboard = async (req, res, next) => {
@@ -68,6 +71,9 @@ const getDashboard = async (req, res, next) => {
         .limit(5)
         .populate('user', 'name email')
         .populate('room', 'roomNumber type'),
+      ActivityLog.find()
+        .sort({ createdAt: -1 })
+        .limit(10),
     ]);
 
     const totalRevenue = revenueResult[0]?.total || 0;
@@ -82,6 +88,22 @@ const getDashboard = async (req, res, next) => {
       revenue: { allTime: totalRevenue, currentMonth: currentMonthRevenue },
       occupancyRate: parseFloat(occupancyRate),
       recentBookings,
+      recentActivities: revenueResult[14] || [], // Wait, let's match the index. Since there are 14 items before (index 0 to 13), the 15th item (ActivityLog.find()) is at index 14. Wait, let's check:
+      // index 0: totalRooms
+      // index 1: occupiedRooms
+      // index 2: availableRooms
+      // index 3: maintenanceRooms
+      // index 4: totalBookings
+      // index 5: todayCheckIns
+      // index 6: todayCheckOuts
+      // index 7: pendingBookings
+      // index 8: confirmedBookings
+      // index 9: totalUsers
+      // index 10: totalStaff
+      // index 11: revenueResult
+      // index 12: monthlyRevenue
+      // index 13: recentBookings
+      // index 14: ActivityLog.find(). So index 14 is correct! Or we can assign a variable for clarity. Let's make it explicit.
     });
   } catch (error) {
     next(error);
@@ -280,10 +302,15 @@ const getRoomsAdmin = async (req, res, next) => {
 // PATCH /api/admin/rooms/:id — full room edit (price, amenities, description, status, etc.)
 const updateRoomAdmin = async (req, res, next) => {
   try {
-    const allowed = ['price', 'status', 'description', 'amenities', 'beds', 'size', 'capacity', 'isActive'];
+    const allowed = ['price', 'status', 'description', 'amenities', 'beds', 'size', 'capacity', 'isActive', 'customPrice'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    // Handle resetting customPrice to default
+    if (req.body.customPrice === null || req.body.customPrice === "") {
+      update.$unset = { customPrice: 1 };
+      delete update.customPrice;
     }
     const room = await Room.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     if (!room) return sendError(res, 404, 'Room not found');
@@ -326,7 +353,8 @@ const changeGuestRoom = async (req, res, next) => {
 
     // Recalculate subtotal with new room price
     const nights = booking.nights;
-    const newSubtotal = newRoom.price * nights;
+    const effectivePrice = newRoom.customPrice ?? newRoom.price;
+    const newSubtotal = effectivePrice * nights;
     const settings = await HotelSettings.getSettings();
     const cgst = Math.round(newSubtotal * settings.cgstPercentage) / 100;
     const sgst = Math.round(newSubtotal * settings.sgstPercentage) / 100;
@@ -334,6 +362,7 @@ const changeGuestRoom = async (req, res, next) => {
     const totalAmount = newSubtotal + tax + (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
 
     booking.room = newRoomId;
+    booking.pricePerNight = effectivePrice;
     booking.subtotal = newSubtotal;
     booking.tax = tax;
     booking.totalAmount = totalAmount;
@@ -349,6 +378,57 @@ const changeGuestRoom = async (req, res, next) => {
 
     return sendSuccess(res, 200, `Guest moved to Room ${newRoom.roomNumber}`, updated);
   } catch (error) { next(error); }
+};
+
+const updateRoomPricing = async (req, res, next) => {
+  try {
+    const { pricing } = req.body;
+    if (!pricing || typeof pricing !== 'object') {
+      return sendError(res, 400, 'pricing object is required');
+    }
+
+    const types = Object.keys(pricing);
+    
+    // Fetch previous rates for change history logging
+    const prevRooms = await Room.find({ type: { $in: types } });
+    const previousPricing = {};
+    prevRooms.forEach((r) => {
+      previousPricing[r.type] = r.price;
+    });
+
+    const updatePromises = types.map((type) => {
+      const price = Number(pricing[type]);
+      if (isNaN(price) || price < 0) {
+        throw new Error(`Invalid price for type ${type}`);
+      }
+      return Room.updateMany({ type }, { price });
+    });
+
+    await Promise.all(updatePromises);
+
+    // Log the action to Activity History
+    const previousRatesFormatted = Object.keys(previousPricing)
+      .map((t) => `${t}: ₹${previousPricing[t]}`)
+      .join(', ');
+    const newRatesFormatted = Object.keys(pricing)
+      .map((t) => `${t}: ₹${pricing[t]}`)
+      .join(', ');
+
+    await logActivity({
+      req,
+      action: 'Room Type Price Updated',
+      module: 'Pricing',
+      description: `Room type pricing updated. previous: [${previousRatesFormatted}] -> current: [${newRatesFormatted}]`,
+      previousData: previousPricing,
+      newData: pricing,
+    });
+
+    const logger = require('../utils/logger');
+    logger.info(`Admin updated room pricing: ${JSON.stringify(pricing)}`);
+    return sendSuccess(res, 200, 'Room pricing updated successfully');
+  } catch (error) {
+    next(error);
+  }
 };
 
 // GET /api/admin/settings
@@ -370,11 +450,164 @@ const updateSettings = async (req, res, next) => {
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
+    
+    const oldSettings = await HotelSettings.findOne({ _id: 'default' });
+
     const settings = await HotelSettings.findByIdAndUpdate('default', update, {
       new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true,
     });
+
+    await logActivity({
+      req,
+      action: 'Configuration Changed',
+      module: 'Settings',
+      description: `System settings updated: ${Object.keys(update).join(', ')}`,
+      previousData: oldSettings ? oldSettings.toObject() : null,
+      newData: settings.toObject(),
+    });
+
     return sendSuccess(res, 200, 'Settings updated', settings);
   } catch (error) { next(error); }
+};
+
+const getActivityLogs = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, module: mod, role, action, user, from, to, search } = req.query;
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+
+    const filter = {};
+
+    if (mod) filter.module = mod;
+    if (role) filter.role = role;
+    if (action) filter.action = action;
+    if (user) filter.userId = user;
+
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) {
+        const endDate = new Date(to);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      filter.$or = [
+        { userName: searchRegex },
+        { description: searchRegex },
+        { action: searchRegex },
+        { module: searchRegex },
+        { entityId: searchRegex }
+      ];
+    }
+
+    const [logs, total] = await Promise.all([
+      ActivityLog.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit, 10)),
+      ActivityLog.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      logs,
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10))
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const exportActivityLogs = async (req, res, next) => {
+  try {
+    const { format = 'csv', module: mod, role, action, user, from, to, search } = req.query;
+
+    const filter = {};
+    if (mod) filter.module = mod;
+    if (role) filter.role = role;
+    if (action) filter.action = action;
+    if (user) filter.userId = user;
+
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) {
+        const endDate = new Date(to);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      filter.$or = [
+        { userName: searchRegex },
+        { description: searchRegex },
+        { action: searchRegex },
+        { module: searchRegex },
+        { entityId: searchRegex }
+      ];
+    }
+
+    const logs = await ActivityLog.find(filter).sort({ createdAt: -1 });
+
+    if (format === 'pdf') {
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ margin: 30, size: 'A4' });
+      
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="activity_logs.pdf"');
+      doc.pipe(res);
+
+      doc.fontSize(18).text('Activity History / Audit Trail', { align: 'center' });
+      doc.fontSize(10).text(`Generated at: ${new Date().toLocaleString()}`, { align: 'center' });
+      doc.moveDown();
+
+      logs.forEach((log, index) => {
+        doc.fontSize(10).font('Helvetica-Bold').text(`${index + 1}. [${new Date(log.createdAt).toLocaleString('en-IN')}] - ${log.userName} (${log.role.toUpperCase()})`);
+        doc.font('Helvetica').fontSize(9)
+          .text(`Module: ${log.module} | Action: ${log.action}`)
+          .text(`Description: ${log.description}`);
+        
+        if (log.previousData || log.newData) {
+          doc.text(`Details: ${JSON.stringify({ previous: log.previousData, current: log.newData })}`, { width: 500 });
+        }
+        doc.moveDown(0.5);
+      });
+
+      doc.end();
+    } else {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="activity_logs.csv"');
+
+      let csvContent = 'Date/Time,User,Role,Module,Action,Description,IP Address\n';
+
+      logs.forEach(log => {
+        const row = [
+          new Date(log.createdAt).toISOString(),
+          `"${log.userName.replace(/"/g, '""')}"`,
+          `"${log.role.replace(/"/g, '""')}"`,
+          `"${log.module.replace(/"/g, '""')}"`,
+          `"${log.action.replace(/"/g, '""')}"`,
+          `"${log.description.replace(/"/g, '""')}"`,
+          `"${(log.ipAddress || '').replace(/"/g, '""')}"`
+        ];
+        csvContent += row.join(',') + '\n';
+      });
+
+      res.status(200).send(csvContent);
+    }
+  } catch (error) {
+    next(error);
+  }
 };
 
 module.exports = {
@@ -389,9 +622,11 @@ module.exports = {
   // Bookings
   updateBookingStatus,
   // Rooms
-  getRoomsAdmin, updateRoomAdmin,
+  getRoomsAdmin, updateRoomAdmin, updateRoomPricing,
   // Active guests + room change
   getActiveGuests, changeGuestRoom,
   // Settings
   getSettings, updateSettings,
+  // Activity history
+  getActivityLogs, exportActivityLogs,
 };

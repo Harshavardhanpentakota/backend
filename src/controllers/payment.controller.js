@@ -12,6 +12,8 @@ const {
 const { sendSuccess, sendError } = require('../utils/response');
 const { generateInvoiceNumber } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { createNotification } = require('../utils/notification');
+const { logActivity } = require('../utils/activity');
 
 let razorpayInstance;
 const getRazorpay = () => {
@@ -143,6 +145,61 @@ const verifyRazorpayPayment = async (req, res, next) => {
       advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
       balanceDue: booking.totalAmount - advancePaid,
     });
+ 
+    // Notify User
+    await createNotification({
+      recipientId: booking.user,
+      title: 'Booking Confirmed',
+      message: `Your booking #${booking.bookingId} has been confirmed.`,
+      type: 'booking_confirmed',
+      metadata: { booking }
+    });
+
+    await createNotification({
+      recipientId: booking.user,
+      title: 'Payment Successful',
+      message: `Payment of ₹${payment.amount} received successfully for Booking #${booking.bookingId}.`,
+      type: 'payment_successful',
+      metadata: { payment, booking }
+    });
+
+    // Notify Reception & Admin
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Payment Completed',
+      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+      type: 'payment_completed',
+      metadata: { payment, booking }
+    });
+
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'Payment Completed',
+      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+      type: 'payment_completed',
+      metadata: { payment, booking }
+    });
+
+    // Log Activities
+    await logActivity({
+      req,
+      action: 'Payment Verified',
+      module: 'Payments',
+      entityId: payment._id.toString(),
+      entityType: 'Payment',
+      description: `Razorpay payment of ₹${payment.amount} verified for Booking #${booking.bookingId}`,
+      newData: payment.toObject()
+    });
+
+    await logActivity({
+      req,
+      action: 'Booking Confirmed',
+      module: 'Bookings',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Booking #${booking.bookingId} confirmed automatically on payment verification`,
+      newData: { status: BOOKING_STATUS.CONFIRMED }
+    });
 
     logger.info(`Payment verified for booking ${bookingId} — txn: ${razorpayPaymentId}`);
     return sendSuccess(res, 200, 'Payment verified successfully', {
@@ -195,6 +252,61 @@ const recordOfflinePayment = async (req, res, next) => {
       subtotal: booking.subtotal,
       tax: booking.tax,
       totalAmount: booking.totalAmount,
+    });
+
+    // Notify User
+    await createNotification({
+      recipientId: booking.user,
+      title: 'Booking Confirmed',
+      message: `Your booking #${booking.bookingId} has been confirmed.`,
+      type: 'booking_confirmed',
+      metadata: { booking }
+    });
+
+    await createNotification({
+      recipientId: booking.user,
+      title: 'Payment Successful',
+      message: `Payment of ₹${payment.amount} received successfully for Booking #${booking.bookingId}.`,
+      type: 'payment_successful',
+      metadata: { payment, booking }
+    });
+
+    // Notify Reception & Admin
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Payment Completed',
+      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+      type: 'payment_completed',
+      metadata: { payment, booking }
+    });
+
+    await createNotification({
+      recipientRole: 'admin',
+      title: 'Payment Completed',
+      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+      type: 'payment_completed',
+      metadata: { payment, booking }
+    });
+
+    // Log Activities
+    await logActivity({
+      req,
+      action: 'Offline Payment Recorded',
+      module: 'Payments',
+      entityId: payment._id.toString(),
+      entityType: 'Payment',
+      description: `Offline payment of ₹${payment.amount} recorded for Booking #${booking.bookingId}`,
+      newData: payment.toObject()
+    });
+
+    await logActivity({
+      req,
+      action: 'Booking Confirmed',
+      module: 'Bookings',
+      entityId: booking._id.toString(),
+      entityType: 'Booking',
+      description: `Booking #${booking.bookingId} confirmed manually on offline payment recorded`,
+      newData: { status: BOOKING_STATUS.CONFIRMED }
     });
 
     logger.info(`Offline payment recorded for booking ${bookingId}`);
@@ -311,6 +423,36 @@ const refundPayment = async (req, res, next) => {
     });
 
     logger.info(`Refund of ₹${amount} processed for payment ${req.params.id} by ${req.user._id}`);
+    
+    // Notify User
+    await createNotification({
+      recipientId: payment.user,
+      title: 'Refund Processed',
+      message: `A refund of ₹${amount} has been processed for Booking #${payment.booking.bookingId || payment.booking}.`,
+      type: 'refund_processed',
+      metadata: { payment, refundAmount: amount }
+    });
+
+    // Notify Reception
+    await createNotification({
+      recipientRole: 'receptionist',
+      title: 'Refund Processed',
+      message: `Refund of ₹${amount} processed for Booking #${payment.booking.bookingId || payment.booking}.`,
+      type: 'refund_processed',
+      metadata: { payment, refundAmount: amount }
+    });
+
+    // Log Activity
+    await logActivity({
+      req,
+      action: 'Refund Processed',
+      module: 'Payments',
+      entityId: payment._id.toString(),
+      entityType: 'Payment',
+      description: `Refund of ₹${amount} processed for Booking #${payment.booking.bookingId || payment.booking}`,
+      newData: { refundAmount: amount }
+    });
+
     return sendSuccess(res, 200, 'Refund processed successfully', {
       refundId,
       refundAmount: amount,
