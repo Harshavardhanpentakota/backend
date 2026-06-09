@@ -245,14 +245,20 @@ const checkIn = async (req, res, next) => {
     booking.tax = tax;
     booking.totalAmount = totalAmount;
 
-    const advancePct = settings.advancePaymentPercent;
-    const advancePaid = Math.round((booking.subtotal * advancePct) / 100);
+    let advancePaid = booking.advancePaid;
+    let advancePct = settings.advancePaymentPercent;
+
+    if (!advancePaid || advancePaid <= 0) {
+      advancePaid = Math.round((booking.subtotal * advancePct) / 100);
+      booking.advancePaid = advancePaid;
+      booking.advancePaidAt = new Date();
+      booking.advancePaymentMethod = advancePaymentMethod;
+    } else {
+      advancePct = Math.round((advancePaid / booking.subtotal) * 100);
+    }
 
     booking.status = BOOKING_STATUS.CHECKED_IN;
     booking.actualCheckIn = new Date();
-    booking.advancePaid = advancePaid;
-    booking.advancePaidAt = new Date();
-    booking.advancePaymentMethod = advancePaymentMethod;
     await booking.save();
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
@@ -303,7 +309,7 @@ const checkIn = async (req, res, next) => {
       checkInTime: booking.actualCheckIn,
       advancePaid,
       advancePct,
-      advancePaymentMethod,
+      advancePaymentMethod: booking.advancePaymentMethod,
     });
   } catch (error) {
     next(error);

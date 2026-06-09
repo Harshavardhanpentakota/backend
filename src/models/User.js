@@ -4,6 +4,17 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { ROLES } = require('../constants');
 
+const normalizePhone = (phone) => {
+  if (!phone) return phone;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+};
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -31,6 +42,7 @@ const userSchema = new mongoose.Schema(
     phone: {
       type: String,
       trim: true,
+      set: normalizePhone,
       match: [/^[+]?[\d\s\-()]{7,20}$/, 'Please provide a valid phone number'],
     },
     role: {

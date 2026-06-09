@@ -14,6 +14,7 @@ const { generateInvoiceNumber } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { createNotification } = require('../utils/notification');
 const { logActivity } = require('../utils/activity');
+const { getRoomTypeAvailability, acquireLock } = require('../utils/availability');
 
 let razorpayInstance;
 const getRazorpay = () => {
@@ -40,6 +41,16 @@ const createRazorpayOrder = async (req, res, next) => {
 
     if (booking.advancePaid > 0) {
       return sendError(res, 409, 'Advance has already been paid for this booking');
+    }
+
+    // Availability Engine check before creating Razorpay order
+    const availability = await getRoomTypeAvailability(booking.roomType, booking.checkInDate, booking.checkOutDate);
+    if (availability.available < 1) {
+      booking.status = BOOKING_STATUS.CANCELLED;
+      booking.cancellationReason = 'No rooms available of this type for the selected dates';
+      booking.cancellationDate = new Date();
+      await booking.save();
+      return sendError(res, 400, 'Rooms of this type are no longer available for your selected dates. Booking has been cancelled.');
     }
 
     // Calculate advance amount from hotel settings
@@ -120,93 +131,151 @@ const verifyRazorpayPayment = async (req, res, next) => {
 
     // Update booking: mark advance as paid, confirm the booking
     const advancePaid = payment.amount;
-    await Booking.findByIdAndUpdate(bookingId, {
-      status: BOOKING_STATUS.CONFIRMED,
-      advancePaid,
-      advancePaidAt: new Date(),
-      advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
-      // Full paymentStatus stays pending until balance is paid at hotel
-    });
-
-    // Generate invoice (room may be null for type-based bookings)
     const booking = await Booking.findById(bookingId);
-    const invoice = await Invoice.create({
-      invoiceNumber: generateInvoiceNumber(),
-      booking: bookingId,
-      payment: payment._id,
-      user: req.user._id,
-      room: booking.room || undefined,
-      roomType: booking.roomType,
-      roomSubtotal: booking.subtotal,
-      subtotal: booking.subtotal,
-      tax: booking.tax,
-      totalAmount: booking.totalAmount,
-      advancePaid,
-      advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
-      balanceDue: booking.totalAmount - advancePaid,
-    });
- 
-    // Notify User
-    await createNotification({
-      recipientId: booking.user,
-      title: 'Booking Confirmed',
-      message: `Your booking #${booking.bookingId} has been confirmed.`,
-      type: 'booking_confirmed',
-      metadata: { booking }
-    });
+    if (!booking) return sendError(res, 404, 'Booking not found');
 
-    await createNotification({
-      recipientId: booking.user,
-      title: 'Payment Successful',
-      message: `Payment of ₹${payment.amount} received successfully for Booking #${booking.bookingId}.`,
-      type: 'payment_successful',
-      metadata: { payment, booking }
-    });
+    const release = acquireLock(booking.roomType);
+    try {
+      const availability = await getRoomTypeAvailability(booking.roomType, booking.checkInDate, booking.checkOutDate);
+      if (availability.available < 1) {
+        logger.warn(`Overbooking detected for booking ${bookingId} on payment verification. Refunding.`);
 
-    // Notify Reception & Admin
-    await createNotification({
-      recipientRole: 'receptionist',
-      title: 'Payment Completed',
-      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
-      type: 'payment_completed',
-      metadata: { payment, booking }
-    });
+        let refundId = null;
+        const refundAmount = payment.amount;
+        try {
+          const razorpay = getRazorpay();
+          const rzRefund = await razorpay.payments.refund(razorpayPaymentId, {
+            amount: Math.round(refundAmount * 100), // paise
+            notes: { reason: 'Room type no longer available (automatically refunded)' },
+          });
+          refundId = rzRefund.id;
+        } catch (rzErr) {
+          logger.error(`Automated refund failed for booking ${bookingId}:`, rzErr.message);
+        }
 
-    await createNotification({
-      recipientRole: 'admin',
-      title: 'Payment Completed',
-      message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
-      type: 'payment_completed',
-      metadata: { payment, booking }
-    });
+        // Cancel the booking and mark paymentStatus as REFUNDED
+        booking.status = BOOKING_STATUS.CANCELLED;
+        booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
+        booking.cancellationDate = new Date();
+        booking.cancellationReason = 'No rooms available (automatically refunded)';
+        booking.refundAmount = refundAmount;
+        await booking.save();
 
-    // Log Activities
-    await logActivity({
-      req,
-      action: 'Payment Verified',
-      module: 'Payments',
-      entityId: payment._id.toString(),
-      entityType: 'Payment',
-      description: `Razorpay payment of ₹${payment.amount} verified for Booking #${booking.bookingId}`,
-      newData: payment.toObject()
-    });
+        // Update payment status
+        payment.status = PAYMENT_STATUS.REFUNDED;
+        payment.refundId = refundId;
+        payment.refundAmount = refundAmount;
+        payment.refundDate = new Date();
+        await payment.save();
 
-    await logActivity({
-      req,
-      action: 'Booking Confirmed',
-      module: 'Bookings',
-      entityId: booking._id.toString(),
-      entityType: 'Booking',
-      description: `Booking #${booking.bookingId} confirmed automatically on payment verification`,
-      newData: { status: BOOKING_STATUS.CONFIRMED }
-    });
+        // Notify User
+        await createNotification({
+          recipientId: booking.user,
+          title: 'Booking Overbooked & Refunded',
+          message: `Your booking #${booking.bookingId} could not be confirmed as no rooms of this type were left. A full refund of ₹${refundAmount} has been issued.`,
+          type: 'booking_cancelled',
+          metadata: { bookingId: booking._id, refundAmount }
+        });
 
-    logger.info(`Payment verified for booking ${bookingId} — txn: ${razorpayPaymentId}`);
-    return sendSuccess(res, 200, 'Payment verified successfully', {
-      payment,
-      invoiceId: invoice._id,
-      invoiceNumber: invoice.invoiceNumber,
-    });
+        // Notify staff
+        await createNotification({
+          recipientRole: 'receptionist',
+          title: 'Overbooked Booking Refunded',
+          message: `Booking #${booking.bookingId} was cancelled and refunded automatically due to no room availability.`,
+          type: 'booking_cancelled',
+          metadata: { bookingId: booking._id }
+        });
+
+        return sendError(res, 409, 'Payment succeeded, but rooms are no longer available. A refund has been automatically initiated.');
+      }
+
+      booking.status = BOOKING_STATUS.CONFIRMED;
+      booking.advancePaid = advancePaid;
+      booking.advancePaidAt = new Date();
+      booking.advancePaymentMethod = PAYMENT_METHOD.RAZORPAY;
+      await booking.save();
+
+      // Generate invoice (room may be null for type-based bookings)
+      const invoice = await Invoice.create({
+        invoiceNumber: generateInvoiceNumber(),
+        booking: bookingId,
+        payment: payment._id,
+        user: req.user._id,
+        room: booking.room || undefined,
+        roomType: booking.roomType,
+        roomSubtotal: booking.subtotal,
+        subtotal: booking.subtotal,
+        tax: booking.tax,
+        totalAmount: booking.totalAmount,
+        advancePaid,
+        advancePaymentMethod: PAYMENT_METHOD.RAZORPAY,
+        balanceDue: booking.totalAmount - advancePaid,
+      });
+
+      // Notify User
+      await createNotification({
+        recipientId: booking.user,
+        title: 'Booking Confirmed',
+        message: `Your booking #${booking.bookingId} has been confirmed.`,
+        type: 'booking_confirmed',
+        metadata: { booking }
+      });
+
+      await createNotification({
+        recipientId: booking.user,
+        title: 'Payment Successful',
+        message: `Payment of ₹${payment.amount} received successfully for Booking #${booking.bookingId}.`,
+        type: 'payment_successful',
+        metadata: { payment, booking }
+      });
+
+      // Notify Reception & Admin
+      await createNotification({
+        recipientRole: 'receptionist',
+        title: 'Payment Completed',
+        message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+        type: 'payment_completed',
+        metadata: { payment, booking }
+      });
+
+      await createNotification({
+        recipientRole: 'admin',
+        title: 'Payment Completed',
+        message: `Payment of ₹${payment.amount} received for Booking #${booking.bookingId}.`,
+        type: 'payment_completed',
+        metadata: { payment, booking }
+      });
+
+      // Log Activities
+      await logActivity({
+        req,
+        action: 'Payment Verified',
+        module: 'Payments',
+        entityId: payment._id.toString(),
+        entityType: 'Payment',
+        description: `Razorpay payment of ₹${payment.amount} verified for Booking #${booking.bookingId}`,
+        newData: payment.toObject()
+      });
+
+      await logActivity({
+        req,
+        action: 'Booking Confirmed',
+        module: 'Bookings',
+        entityId: booking._id.toString(),
+        entityType: 'Booking',
+        description: `Booking #${booking.bookingId} confirmed automatically on payment verification`,
+        newData: { status: BOOKING_STATUS.CONFIRMED }
+      });
+
+      logger.info(`Payment verified for booking ${bookingId} — txn: ${razorpayPaymentId}`);
+      return sendSuccess(res, 200, 'Payment verified successfully', {
+        payment,
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.invoiceNumber,
+      });
+    } finally {
+      release();
+    }
   } catch (error) {
     next(error);
   }

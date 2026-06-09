@@ -6,13 +6,25 @@ const { sendSuccess, sendError } = require('../utils/response');
 const logger = require('../utils/logger');
 const { logActivity } = require('../utils/activity');
 
+const normalizePhone = (phone) => {
+  if (!phone) return phone;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+};
+
 // POST /api/auth/register
 const register = async (req, res, next) => {
   try {
     const { name, email, password, phone } = req.body;
+    const normalizedPhone = normalizePhone(phone);
 
     // Check phone uniqueness
-    const existingPhone = await User.findOne({ phone });
+    const existingPhone = await User.findOne({ phone: normalizedPhone });
     if (existingPhone) {
       return sendError(res, 409, 'An account with this phone number already exists.');
     }
@@ -25,7 +37,7 @@ const register = async (req, res, next) => {
       }
     }
 
-    const user = await User.create({ name, email: email || undefined, password, phone });
+    const user = await User.create({ name, email: email || undefined, password, phone: normalizedPhone });
 
     const accessToken = generateAccessToken({ id: user._id, role: user.role });
     const refreshToken = generateRefreshToken({ id: user._id });
@@ -34,7 +46,7 @@ const register = async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
-    logger.info(`New user registered: ${phone}${email ? ' / ' + email : ''}`);
+    logger.info(`New user registered: ${normalizedPhone}${email ? ' / ' + email : ''}`);
 
     return sendSuccess(res, 201, 'Registration successful', {
       user,
@@ -55,7 +67,7 @@ const login = async (req, res, next) => {
 
     // Determine if identifier looks like a phone or email
     const isEmail = rawId.includes('@');
-    const query = isEmail ? { email: rawId } : { phone: rawId };
+    const query = isEmail ? { email: rawId } : { phone: normalizePhone(rawId) };
 
     const user = await User.findOne(query).select('+password');
     if (!user) {
