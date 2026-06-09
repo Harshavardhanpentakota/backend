@@ -1,7 +1,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { BOOKING_STATUS, BOOKING_SOURCE, PAYMENT_STATUS } = require('../constants');
+const { BOOKING_STATUS, BOOKING_SOURCE, PAYMENT_STATUS, PAYMENT_METHOD } = require('../constants');
 
 const bookingSchema = new mongoose.Schema(
   {
@@ -130,7 +130,7 @@ const bookingSchema = new mongoose.Schema(
     advancePaidAt: { type: Date },
     advancePaymentMethod: {
       type: String,
-      enum: ['cash', 'card', 'upi', 'net_banking'],
+      enum: Object.values(PAYMENT_METHOD),
       default: 'cash',
     },
   },
