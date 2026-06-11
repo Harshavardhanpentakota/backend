@@ -200,4 +200,95 @@ const changePassword = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, refreshToken, logout, getMe, changePassword };
+// POST /api/auth/forgot-password
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return sendError(res, 400, 'Email is required.');
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return sendError(res, 404, 'No account found with this email address.');
+    }
+
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store in User document with 10-minute expiry
+    user.otp = otp;
+    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save({ validateBeforeSave: false });
+
+    // Send email with OTP
+    try {
+      const { sendEmail, otpEmail } = require('../utils/email');
+      const emailData = otpEmail(otp, user);
+      await sendEmail(emailData);
+    } catch (emailErr) {
+      logger.error(`Failed to send password reset OTP email to ${email}: ${emailErr.message}`);
+      return sendError(res, 500, 'Failed to send OTP to email. Please try again later.');
+    }
+
+    logger.info(`OTP generated and sent to ${email}`);
+    return sendSuccess(res, 200, 'OTP sent to your email successfully.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/auth/reset-password
+const resetPassword = async (req, res, next) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return sendError(res, 400, 'Email, OTP, and new password are required.');
+    }
+    if (newPassword.length < 8) {
+      return sendError(res, 400, 'New password must be at least 8 characters long.');
+    }
+
+    const user = await User.findOne({ email }).select('+password +otp +otpExpires');
+    if (!user) {
+      return sendError(res, 404, 'No account found with this email address.');
+    }
+
+    // Verify OTP
+    if (!user.otp || !user.otpExpires || user.otp !== otp || user.otpExpires < new Date()) {
+      return sendError(res, 400, 'Invalid or expired OTP.');
+    }
+
+    // Update password, clear OTP
+    user.password = newPassword;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    await logActivity({
+      req,
+      userId: user._id,
+      userName: user.name,
+      role: user.role,
+      action: 'Password Reset',
+      module: 'Authentication',
+      description: `Password reset via OTP verification for ${user.email}.`
+    });
+
+    logger.info(`Password successfully reset for user: ${email}`);
+    return sendSuccess(res, 200, 'Password has been reset successfully. You can now login.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  refreshToken,
+  logout,
+  getMe,
+  changePassword,
+  forgotPassword,
+  resetPassword,
+};

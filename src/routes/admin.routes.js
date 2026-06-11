@@ -5,7 +5,7 @@ const router = express.Router();
 const {
   getDashboard, getRevenueReport, getOccupancyReport, getBookingsByRoomType,
   getStaff, createStaff, updateStaff, deleteStaff,
-  getUsers, updateBookingStatus,
+  getUsers, changeUserPassword, updateBookingStatus,
   getRoomsAdmin, updateRoomAdmin, updateRoomPricing,
   getActiveGuests, changeGuestRoom,
   getSettings, updateSettings,
@@ -45,6 +45,12 @@ router.get('/staff', getStaff);
 router.post('/staff', createStaff);
 router.patch('/staff/:id', [param('id').isMongoId()], validate, updateStaff);
 router.delete('/staff/:id', [param('id').isMongoId()], validate, deleteStaff);
+
+// User password management
+router.patch('/users/:id/password', [
+  param('id').isMongoId().withMessage('Invalid user ID'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+], validate, changeUserPassword);
 
 // Booking management
 router.patch('/bookings/:id/status', [param('id').isMongoId(), body('status').notEmpty()], validate, updateBookingStatus);

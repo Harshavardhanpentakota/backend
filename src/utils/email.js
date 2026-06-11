@@ -82,4 +82,41 @@ const cancellationEmail = (booking, user, refundAmount) => ({
   `,
 });
 
-module.exports = { sendEmail, bookingConfirmationEmail, cancellationEmail };
+const checkoutEmail = (booking, user) => ({
+  to: user.email,
+  subject: `Checked Out Successfully — ${HOTEL.NAME} | #${booking.bookingId}`,
+  html: `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e5e7eb;border-radius:8px;">
+      <h2 style="color:#1e3a5f;">${HOTEL.NAME}</h2>
+      <p>Dear ${user.name},</p>
+      <p>Your stay for Booking <strong>#${booking.bookingId}</strong> has checked out. Thank you for choosing to stay with us!</p>
+      <p>We hope you had a pleasant experience and look forward to welcoming you back in the future.</p>
+      <p style="color:#6b7280;font-size:12px;">For any inquiries or feedback: ${HOTEL.PHONE} | ${HOTEL.EMAIL}</p>
+    </div>
+  `,
+});
+
+const otpEmail = (otp, user) => ({
+  to: user.email,
+  subject: `Password Reset OTP — ${HOTEL.NAME}`,
+  html: `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e5e7eb;border-radius:8px;">
+      <h2 style="color:#1e3a5f;">${HOTEL.NAME}</h2>
+      <p>Dear ${user.name || 'Guest'},</p>
+      <p>We received a request to reset your password. Use the following One-Time Password (OTP) to proceed. This OTP is valid for 10 minutes:</p>
+      <div style="text-align:center;margin:24px 0;">
+        <span style="font-size:32px;font-weight:bold;letter-spacing:6px;background-color:#f3f4f6;padding:12px 24px;border-radius:8px;border:1px solid #e5e7eb;color:#1e3a5f;">${otp}</span>
+      </div>
+      <p>If you did not request a password reset, please ignore this email.</p>
+      <p style="color:#6b7280;font-size:12px;">Address: ${HOTEL.ADDRESS} | Phone: ${HOTEL.PHONE}</p>
+    </div>
+  `,
+});
+
+module.exports = {
+  sendEmail,
+  bookingConfirmationEmail,
+  cancellationEmail,
+  checkoutEmail,
+  otpEmail,
+};

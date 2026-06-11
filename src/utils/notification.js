@@ -2,7 +2,7 @@
 
 const Notification = require('../models/Notification');
 const { notificationEmitter } = require('./notificationStream');
-const { sendEmail, bookingConfirmationEmail, cancellationEmail } = require('./email');
+const { sendEmail, bookingConfirmationEmail, cancellationEmail, checkoutEmail } = require('./email');
 const User = require('../models/User');
 const Room = require('../models/Room');
 const logger = require('./logger');
@@ -31,7 +31,7 @@ const createNotification = async ({ recipientId, recipientRole, title, message, 
         if (type === 'booking_confirmed') {
           try {
             const booking = metadata.booking;
-            const room = metadata.room || (booking && await Room.findById(booking.roomId));
+            const room = metadata.room || (booking && await Room.findById(booking.room));
             if (booking && room) {
               const mailOptions = bookingConfirmationEmail(booking, user, room);
               await sendEmail(mailOptions);
@@ -91,6 +91,16 @@ const createNotification = async ({ recipientId, recipientRole, title, message, 
             }
           } catch (err) {
             logger.error(`Email notification fail (booking_checked_in): ${err.message}`);
+          }
+        } else if (type === 'booking_checked_out') {
+          try {
+            const booking = metadata.booking;
+            if (booking) {
+              const mailOptions = checkoutEmail(booking, user);
+              await sendEmail(mailOptions);
+            }
+          } catch (err) {
+            logger.error(`Email notification fail (booking_checked_out): ${err.message}`);
           }
         }
       }

@@ -610,6 +610,41 @@ const exportActivityLogs = async (req, res, next) => {
   }
 };
 
+// PATCH /api/admin/users/:id/password
+const changeUserPassword = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password || password.length < 8) {
+      return sendError(res, 400, 'Password must be at least 8 characters long.');
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return sendError(res, 404, 'User not found.');
+    }
+
+    user.password = password;
+    await user.save();
+
+    await logActivity({
+      req,
+      action: 'User Password Changed by Admin',
+      module: 'User Management',
+      entityId: user._id.toString(),
+      entityType: 'User',
+      description: `Admin changed password for guest ${user.name} (${user.email || user.phone || 'N/A'}).`
+    });
+
+    const logger = require('../utils/logger');
+    logger.info(`Admin changed password for user: ${user._id}`);
+    return sendSuccess(res, 200, `Password for ${user.name} has been updated successfully.`);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getDashboard,
   getRevenueReport,
@@ -619,6 +654,7 @@ module.exports = {
   getStaff, createStaff, updateStaff, deleteStaff,
   // Users
   getUsers,
+  changeUserPassword,
   // Bookings
   updateBookingStatus,
   // Rooms

@@ -83,6 +83,14 @@ const userSchema = new mongoose.Schema(
       type: Date,
       select: false,
     },
+    otp: {
+      type: String,
+      select: false,
+    },
+    otpExpires: {
+      type: Date,
+      select: false,
+    },
     lastLogin: {
       type: Date,
     },
@@ -95,6 +103,8 @@ const userSchema = new mongoose.Schema(
         delete ret.refreshToken;
         delete ret.passwordResetToken;
         delete ret.passwordResetExpires;
+        delete ret.otp;
+        delete ret.otpExpires;
         return ret;
       },
     },
