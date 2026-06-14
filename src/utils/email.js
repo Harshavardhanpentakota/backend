@@ -25,6 +25,10 @@ const getTransporter = () => {
  * Send a raw email.
  */
 const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
+  if (!to) {
+    logger.warn(`Email not sent: recipient address is empty/missing (subject: "${subject}")`);
+    return null;
+  }
   try {
     const info = await getTransporter().sendMail({
       from: process.env.EMAIL_FROM || `"${HOTEL.NAME}" <noreply@hotelabhitejinn.com>`,

@@ -5,6 +5,7 @@ const { notificationEmitter } = require('./notificationStream');
 const { sendEmail, bookingConfirmationEmail, cancellationEmail, checkoutEmail } = require('./email');
 const User = require('../models/User');
 const Room = require('../models/Room');
+const { HOTEL } = require('../constants');
 const logger = require('./logger');
 
 /**
@@ -104,6 +105,38 @@ const createNotification = async ({ recipientId, recipientRole, title, message, 
           }
         }
       }
+    }
+
+    if (recipientRole) {
+      // Find all active users with this role and email them in a non-blocking way
+      User.find({ role: recipientRole, isActive: true })
+        .then((staffUsers) => {
+          staffUsers.forEach((staff) => {
+            if (staff.email) {
+              sendEmail({
+                to: staff.email,
+                subject: `${title} — ${HOTEL.NAME}`,
+                html: `
+                  <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e5e7eb;border-radius:8px;">
+                    <h2 style="color:#1e3a5f;">${HOTEL.NAME} — Notification</h2>
+                    <p>Dear ${staff.name},</p>
+                    <p>A new notification has been posted for your role (<strong>${recipientRole}</strong>):</p>
+                    <div style="background-color:#f3f4f6;padding:16px;border-radius:8px;border:1px solid #e5e7eb;margin:16px 0;">
+                      <strong style="color:#1e3a5f;font-size:16px;">${title}</strong>
+                      <p style="margin-top:8px;font-size:14px;color:#374151;">${message}</p>
+                    </div>
+                    <p style="color:#6b7280;font-size:12px;">This is an automated notification. Please log in to the admin system for details.</p>
+                  </div>
+                `
+              }).catch((err) => {
+                logger.error(`Failed to send role email to ${staff.email}: ${err.message}`);
+              });
+            }
+          });
+        })
+        .catch((err) => {
+          logger.error(`Failed to find staff users for role ${recipientRole}: ${err.message}`);
+        });
     }
 
     return notification;

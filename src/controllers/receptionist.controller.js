@@ -80,13 +80,22 @@ const createOfflineBooking = async (req, res, next) => {
     if (conflict) return sendError(res, 409, 'Room is not available for the selected dates');
 
     let guestUser = null;
-    if (guestDetails?.email) {
-      guestUser = await User.findOne({ email: guestDetails.email });
+    const guestEmail = guestDetails?.email ? guestDetails.email.trim() : '';
+    const guestPhone = guestDetails?.phone ? guestDetails.phone.trim() : '';
+
+    if (guestEmail || guestPhone) {
+      if (guestEmail) {
+        guestUser = await User.findOne({ email: guestEmail });
+      }
+      if (!guestUser && guestPhone) {
+        guestUser = await User.findOne({ phone: guestPhone });
+      }
+
       if (!guestUser) {
         guestUser = await User.create({
           name: guestDetails.name,
-          email: guestDetails.email,
-          phone: guestDetails.phone,
+          email: guestEmail || undefined,
+          phone: guestPhone || undefined,
           password: `Guest@${Date.now()}`,
           role: 'user',
         });

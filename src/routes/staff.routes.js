@@ -13,7 +13,7 @@ const createStaffValidation = [
   body('role').notEmpty().withMessage('Role is required').isIn(Object.values(STAFF_ROLES)),
   body('shift').notEmpty().withMessage('Shift is required').isIn(Object.values(SHIFT)),
   body('contact.phone').optional().trim(),
-  body('contact.email').optional().isEmail().withMessage('Invalid email'),
+  body('contact.email').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email'),
 ];
 
 router.use(authenticate, authorize(ROLES.ADMIN));

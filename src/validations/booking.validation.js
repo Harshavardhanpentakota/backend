@@ -77,7 +77,7 @@ const offlineBookingValidation = [
     .notEmpty().withMessage('Guest phone is required'),
 
   body('guestDetails.email')
-    .optional()
+    .optional({ checkFalsy: true })
     .isEmail().withMessage('Invalid guest email'),
 
   body('guestDetails.idProof')
