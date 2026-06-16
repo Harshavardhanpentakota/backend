@@ -133,9 +133,30 @@ const bookingSchema = new mongoose.Schema(
       enum: Object.values(PAYMENT_METHOD),
       default: 'cash',
     },
+    discount: {
+      type: Number,
+      default: 0,
+      min: [0, 'Discount cannot be negative'],
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      alias: 'isDelete',
+    },
   },
   { timestamps: true }
 );
+
+// Soft delete middleware
+bookingSchema.pre(/^find/, function (next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+bookingSchema.pre('aggregate', function (next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 // Prevent check-out before check-in
 bookingSchema.pre('validate', function (next) {

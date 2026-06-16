@@ -645,6 +645,103 @@ const changeUserPassword = async (req, res, next) => {
   }
 };
 
+const deleteBooking = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const booking = await Booking.findById(id);
+    if (!booking) return sendError(res, 404, 'Booking not found');
+
+    if (booking.status === BOOKING_STATUS.CHECKED_IN && booking.room) {
+      await Room.findByIdAndUpdate(booking.room, { status: ROOM_STATUS.AVAILABLE });
+    }
+
+    await Booking.findByIdAndUpdate(id, { isDeleted: true });
+
+    await logActivity({
+      req,
+      action: 'Booking Deleted',
+      module: 'Bookings',
+      entityId: id,
+      entityType: 'Booking',
+      description: `Admin deleted booking #${booking.bookingId}`
+    });
+
+    return sendSuccess(res, 200, 'Booking deleted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+const deletePayment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const payment = await Payment.findById(id);
+    if (!payment) return sendError(res, 404, 'Payment not found');
+
+    await Payment.findByIdAndUpdate(id, { isDeleted: true });
+
+    await logActivity({
+      req,
+      action: 'Payment Deleted',
+      module: 'Payments',
+      entityId: id,
+      entityType: 'Payment',
+      description: `Admin deleted payment of ₹${payment.amount} (Txn: ${payment.transactionId || 'N/A'})`
+    });
+
+    return sendSuccess(res, 200, 'Payment deleted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+const deleteInvoice = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const Invoice = require('../models/Invoice');
+    const invoice = await Invoice.findById(id);
+    if (!invoice) return sendError(res, 404, 'Invoice not found');
+
+    await Invoice.findByIdAndUpdate(id, { isDeleted: true });
+
+    await logActivity({
+      req,
+      action: 'Invoice Deleted',
+      module: 'Invoices',
+      entityId: id,
+      entityType: 'Invoice',
+      description: `Admin deleted invoice #${invoice.invoiceNumber}`
+    });
+
+    return sendSuccess(res, 200, 'Invoice deleted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+const deleteUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return sendError(res, 404, 'User not found');
+
+    await User.findByIdAndUpdate(id, { isDeleted: true });
+
+    await logActivity({
+      req,
+      action: 'User Deleted',
+      module: 'User Management',
+      entityId: id,
+      entityType: 'User',
+      description: `Admin deleted guest/user ${user.name} (${user.email || user.phone})`
+    });
+
+    return sendSuccess(res, 200, 'User deleted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getDashboard,
   getRevenueReport,
@@ -655,8 +752,10 @@ module.exports = {
   // Users
   getUsers,
   changeUserPassword,
+  deleteUser,
   // Bookings
   updateBookingStatus,
+  deleteBooking,
   // Rooms
   getRoomsAdmin, updateRoomAdmin, updateRoomPricing,
   // Active guests + room change
@@ -665,4 +764,7 @@ module.exports = {
   getSettings, updateSettings,
   // Activity history
   getActivityLogs, exportActivityLogs,
+  // Deletions
+  deletePayment,
+  deleteInvoice,
 };

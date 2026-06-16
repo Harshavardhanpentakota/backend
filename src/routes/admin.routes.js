@@ -10,6 +10,7 @@ const {
   getActiveGuests, changeGuestRoom,
   getSettings, updateSettings,
   getActivityLogs, exportActivityLogs,
+  deleteBooking, deletePayment, deleteInvoice, deleteUser,
 } = require('../controllers/admin.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
 const { ROLES } = require('../constants');
@@ -59,8 +60,10 @@ router.patch('/bookings/:id/status', [param('id').isMongoId(), body('status').no
 router.patch('/rooms/pricing', updateRoomPricing);
 router.patch('/rooms/:id', [param('id').isMongoId()], validate, updateRoomAdmin);
 
-// Hotel settings
-router.get('/settings', getSettings);
-router.patch('/settings', updateSettings);
+// Record deletions (admin-only)
+router.delete('/bookings/:id', [param('id').isMongoId()], validate, deleteBooking);
+router.delete('/payments/:id', [param('id').isMongoId()], validate, deletePayment);
+router.delete('/invoices/:id', [param('id').isMongoId()], validate, deleteInvoice);
+router.delete('/users/:id', [param('id').isMongoId()], validate, deleteUser);
 
 module.exports = router;

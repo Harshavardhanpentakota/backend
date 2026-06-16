@@ -66,9 +66,25 @@ const paymentSchema = new mongoose.Schema(
     notes: {
       type: String,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      alias: 'isDelete',
+    },
   },
   { timestamps: true }
 );
+
+// Soft delete middleware
+paymentSchema.pre(/^find/, function (next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+paymentSchema.pre('aggregate', function (next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 // Indexes
 paymentSchema.index({ booking: 1 });

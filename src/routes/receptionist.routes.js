@@ -5,7 +5,7 @@ const router = express.Router();
 const {
   createOfflineBooking, getBookingDetail, checkIn, checkOut,
   addExtraCharge, removeExtraCharge, getTodayActivity,
-  getAssignableRooms,
+  getAssignableRooms, extendStay,
 } = require('../controllers/receptionist.controller');
 const { getBookings } = require('../controllers/booking.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
@@ -26,6 +26,9 @@ router.post('/checkin', [
   body('roomId').optional().isMongoId().withMessage('Invalid roomId'),
 ], validate, checkIn);
 router.post('/checkout', [body('bookingId').notEmpty()], validate, checkOut);
+router.patch('/bookings/:bookingId/extend', [
+  body('newCheckOutDate').isISO8601().withMessage('newCheckOutDate must be a valid ISO8601 date')
+], validate, extendStay);
 router.post(
   '/bookings/:bookingId/charges',
   [body('description').notEmpty(), body('amount').isFloat({ min: 0.01 })],

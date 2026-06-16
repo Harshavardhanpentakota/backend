@@ -98,7 +98,7 @@ const listInvoices = async (req, res, next) => {
 
     const [invoices, total] = await Promise.all([
       Invoice.find(filter)
-        .populate('booking', 'bookingId checkInDate checkOutDate nights status')
+        .populate('booking', 'bookingId checkInDate checkOutDate actualCheckOut nights status')
         .populate('user', 'name email phone')
         .populate('room', 'roomNumber type')
         .sort({ generatedAt: -1 })

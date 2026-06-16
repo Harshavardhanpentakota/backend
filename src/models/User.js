@@ -94,6 +94,11 @@ const userSchema = new mongoose.Schema(
     lastLogin: {
       type: Date,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      alias: 'isDelete',
+    },
   },
   {
     timestamps: true,
@@ -110,6 +115,17 @@ const userSchema = new mongoose.Schema(
     },
   }
 );
+
+// Soft delete middleware
+userSchema.pre(/^find/, function (next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+userSchema.pre('aggregate', function (next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 // Indexes
 // email is already indexed via unique: true in the schema definition

@@ -344,4 +344,44 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       expect(r2.price).toBe(5800);
     });
   });
+
+  describe('Soft Deletion Logic Tests', () => {
+    it('should soft-delete booking and hide it from query lists but preserve in db', async () => {
+      // 1. Create a booking
+      const booking = await Booking.create({
+        bookingId: 'BK-SOFTDELETE-TEST',
+        user: regularUser._id,
+        room: suiteRoom1._id,
+        roomType: 'Suite',
+        pricePerNight: 4000,
+        checkInDate: new Date('2026-08-01'),
+        checkOutDate: new Date('2026-08-03'),
+        guests: 2,
+        nights: 2,
+        subtotal: 8000,
+        totalAmount: 8000,
+      });
+
+      // Verify booking is found via standard find
+      const foundBefore = await Booking.findById(booking._id);
+      expect(foundBefore).toBeDefined();
+      expect(foundBefore.bookingId).toBe('BK-SOFTDELETE-TEST');
+
+      // 2. Perform deletion request via API
+      const deleteRes = await request(app)
+        .delete(`/api/admin/bookings/${booking._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(deleteRes.status).toBe(200);
+
+      // 3. Verify that standard query doesn't find it anymore
+      const foundAfter = await Booking.findById(booking._id);
+      expect(foundAfter).toBeNull();
+
+      // 4. Verify that direct query bypassing Mongoose middleware still finds it with isDeleted true
+      const rawDoc = await mongoose.connection.db.collection('bookings').findOne({ _id: booking._id });
+      expect(rawDoc).toBeDefined();
+      expect(rawDoc.isDeleted).toBe(true);
+    });
+  });
 });
