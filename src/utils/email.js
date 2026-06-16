@@ -31,7 +31,7 @@ const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
   }
   try {
     const info = await getTransporter().sendMail({
-      from: process.env.EMAIL_FROM || `"${HOTEL.NAME}" <noreply@hotelabhitejinn.com>`,
+      from: process.env.EMAIL_FROM || `"${HOTEL.NAME}" <abhitejinn11@gmail.com>`,
       to,
       subject,
       html,
@@ -79,8 +79,8 @@ const cancellationEmail = (booking, user, refundAmount) => ({
       <p>Dear ${user.name},</p>
       <p>Your booking <strong>#${booking.bookingId}</strong> has been <strong>cancelled</strong>.</p>
       ${refundAmount > 0
-        ? `<p>A refund of <strong>₹${refundAmount.toLocaleString('en-IN')}</strong> will be processed within 5-7 business days.</p>`
-        : `<p>As per our cancellation policy, no refund is applicable for cancellations within 24 hours of check-in.</p>`}
+      ? `<p>A refund of <strong>₹${refundAmount.toLocaleString('en-IN')}</strong> will be processed within 5-7 business days.</p>`
+      : `<p>As per our cancellation policy, no refund is applicable for cancellations within 24 hours of check-in.</p>`}
       <p style="color:#6b7280;font-size:12px;">For support: ${HOTEL.PHONE} | ${HOTEL.EMAIL}</p>
     </div>
   `,

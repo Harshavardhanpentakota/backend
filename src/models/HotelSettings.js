@@ -16,7 +16,7 @@ const hotelSettingsSchema = new mongoose.Schema(
     // ── Hotel info ────────────────────────────────────────────────────────────
     hotelName: { type: String, default: 'Hotel Abhitejinn' },
     hotelPhone: { type: String, default: '+91 98765 43210' },
-    hotelEmail: { type: String, default: 'info@hotelabhitejinn.com' },
+    hotelEmail: { type: String, default: 'abhitejinn11@gmail.com' },
     hotelAddress: { type: String, default: '123 Hotel Street, Mumbai, Maharashtra 400001' },
     hotelTagline: { type: String, default: 'Your home away from home' },
     gstNumber: { type: String, default: '' },

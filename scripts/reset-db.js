@@ -169,7 +169,7 @@ const resetDatabase = async () => {
       advancePaymentPercent: 10,
       hotelName: 'Hotel Abhitej Inn',
       hotelPhone: '+91 88012 34567',
-      hotelEmail: 'info@hotelabhitejinn.com',
+      hotelEmail: 'abhitejinn11@gmail.com',
       hotelAddress: 'Near Jeypore Junction, Araku Village Mandal, Dumbriguda, Andhra Pradesh',
     });
     console.log('✅ Initialized default Hotel Settings.');

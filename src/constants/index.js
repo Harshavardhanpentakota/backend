@@ -102,7 +102,7 @@ const HOTEL = Object.freeze({
   NAME: process.env.HOTEL_NAME || 'Hotel Abhitej Inn',
   ADDRESS: process.env.HOTEL_ADDRESS || 'Near Jeypore Junction, Araku Village Mandal, Dumbriguda, Andhra Pradesh',
   PHONE: process.env.HOTEL_PHONE || '+91-8801234567',
-  EMAIL: process.env.HOTEL_EMAIL || 'info@hotelabhitejinn.com',
+  EMAIL: process.env.HOTEL_EMAIL || 'abhitejinn11@gmail.com',
   CHECKIN_TIME: process.env.HOTEL_CHECKIN_TIME || '12:00',
   CHECKOUT_TIME: process.env.HOTEL_CHECKOUT_TIME || '10:00',
   FLOORS: 3,
