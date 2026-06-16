@@ -60,12 +60,28 @@ const staffSchema = new mongoose.Schema(
     notes: {
       type: String,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      alias: 'isDelete',
+    },
   },
   { timestamps: true }
 );
 
 staffSchema.index({ role: 1, shift: 1 });
 // employeeId is already indexed via unique: true in the schema definition
+
+// Soft delete middleware
+staffSchema.pre(/^find/, function (next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+staffSchema.pre('aggregate', function (next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 // Auto-generate employee ID before saving new staff
 staffSchema.pre('save', async function (next) {

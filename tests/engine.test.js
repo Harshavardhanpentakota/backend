@@ -18,6 +18,8 @@ const Booking = require('../src/models/Booking');
 const User = require('../src/models/User');
 const HotelSettings = require('../src/models/HotelSettings');
 const Invoice = require('../src/models/Invoice');
+const Payment = require('../src/models/Payment');
+const Staff = require('../src/models/Staff');
 const { generateAccessToken } = require('../src/utils/jwt');
 const { ROOM_STATUS, BOOKING_STATUS, ROLES } = require('../src/constants');
 
@@ -266,6 +268,13 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       // Verify room status is set to occupied
       const updatedRoom = await Room.findById(suiteRoom1._id);
       expect(updatedRoom.status).toBe(ROOM_STATUS.OCCUPIED);
+
+      // Verify check-in advance payment record is created
+      const advPayment = await Payment.findOne({ booking: bookingDocId, notes: /Advance payment/ });
+      expect(advPayment).toBeDefined();
+      expect(advPayment.amount).toBe(700); // 10% of 7000 subtotal
+      expect(advPayment.method).toBe('cash');
+      expect(advPayment.status).toBe('paid');
     });
 
     it('should check out guest, reset room status, and generate invoice using overridden pricing', async () => {
@@ -289,6 +298,13 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       expect(invoice.roomSubtotal).toBe(7000);
       expect(invoice.tax).toBe(840);
       expect(invoice.totalAmount).toBe(7840);
+
+      // Verify check-out balance payment record is created
+      const balPayment = await Payment.findOne({ booking: bookingDocId, notes: /Balance payment/ });
+      expect(balPayment).toBeDefined();
+      expect(balPayment.amount).toBe(7140); // 7840 total - 700 advance
+      expect(balPayment.method).toBe('cash');
+      expect(balPayment.status).toBe('paid');
     });
   });
 
@@ -382,6 +398,96 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       const rawDoc = await mongoose.connection.db.collection('bookings').findOne({ _id: booking._id });
       expect(rawDoc).toBeDefined();
       expect(rawDoc.isDeleted).toBe(true);
+    });
+
+    it('should soft-delete staff member and hide them from query lists but preserve in db', async () => {
+      // 1. Create a staff member
+      const staffMember = await Staff.create({
+        name: 'Staff Soft Delete Test',
+        role: 'receptionist',
+        shift: 'morning',
+      });
+
+      // Verify staff is found via standard find
+      const foundBefore = await Staff.findById(staffMember._id);
+      expect(foundBefore).toBeDefined();
+      expect(foundBefore.name).toBe('Staff Soft Delete Test');
+
+      // 2. Perform deletion request via API
+      const deleteRes = await request(app)
+        .delete(`/api/admin/staff/${staffMember._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(deleteRes.status).toBe(200);
+
+      // 3. Verify that standard query doesn't find them anymore
+      const foundAfter = await Staff.findById(staffMember._id);
+      expect(foundAfter).toBeNull();
+
+      // 4. Verify that direct query bypassing Mongoose middleware still finds them with isDeleted true
+      const rawDoc = await mongoose.connection.db.collection('staffs').findOne({ _id: staffMember._id });
+      expect(rawDoc).toBeDefined();
+      expect(rawDoc.isDeleted).toBe(true);
+    });
+  });
+
+  describe('Password-Verified Refund Logic Tests', () => {
+    it('should fail refund with incorrect password and succeed with correct password', async () => {
+      // 1. Create a booking and a payment
+      const booking = await Booking.create({
+        bookingId: 'BK-REFUND-TEST',
+        user: regularUser._id,
+        roomType: 'Suite',
+        pricePerNight: 4000,
+        checkInDate: new Date('2026-09-01'),
+        checkOutDate: new Date('2026-09-03'),
+        guests: 2,
+        nights: 2,
+        subtotal: 8000,
+        totalAmount: 8000,
+        status: BOOKING_STATUS.CONFIRMED,
+      });
+
+      const payment = await Payment.create({
+        booking: booking._id,
+        user: regularUser._id,
+        amount: 8000,
+        method: 'cash',
+        status: 'paid',
+        transactionId: 'TXN-REFUND-TEST',
+      });
+
+      // 2. Attempt refund with WRONG password
+      const badRes = await request(app)
+        .post(`/api/payments/${payment._id}/refund`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          password: 'wrong_password_123',
+          reason: 'Customer requested refund',
+        });
+
+      expect(badRes.status).toBe(401);
+      expect(badRes.body.success).toBe(false);
+      expect(badRes.body.message).toContain('Invalid password');
+
+      // 3. Attempt refund with CORRECT password
+      const goodRes = await request(app)
+        .post(`/api/payments/${payment._id}/refund`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          password: 'password123',
+          reason: 'Customer requested refund',
+        });
+
+      expect(goodRes.status).toBe(200);
+      expect(goodRes.body.success).toBe(true);
+
+      // Verify payment and booking statuses in db
+      const updatedPayment = await Payment.findById(payment._id);
+      expect(updatedPayment.status).toBe('refunded');
+
+      const updatedBooking = await Booking.findById(booking._id);
+      expect(updatedBooking.paymentStatus).toBe('refunded');
     });
   });
 });

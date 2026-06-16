@@ -456,7 +456,23 @@ const refundPayment = async (req, res, next) => {
       return sendError(res, 400, `Cannot refund a payment with status "${payment.status}"`);
     }
 
-    const { reason = 'Refund initiated by staff', refundAmount } = req.body;
+    const { reason = 'Refund initiated by staff', refundAmount, password } = req.body;
+
+    if (!password) {
+      return sendError(res, 400, 'Password is required to confirm refund');
+    }
+
+    const User = require('../models/User');
+    const staffUser = await User.findById(req.user._id).select('+password');
+    if (!staffUser) {
+      return sendError(res, 404, 'Staff account not found');
+    }
+
+    const isMatch = await staffUser.comparePassword(password);
+    if (!isMatch) {
+      return sendError(res, 401, 'Invalid password. Refund unauthorized.');
+    }
+
     const amount = refundAmount ? Math.min(Number(refundAmount), payment.amount) : payment.amount;
 
     let refundId = null;

@@ -240,9 +240,9 @@ const updateStaff = async (req, res, next) => {
 // DELETE /api/admin/staff/:id  — soft delete
 const deleteStaff = async (req, res, next) => {
   try {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    const staff = await Staff.findByIdAndUpdate(req.params.id, { isDeleted: true, isActive: false }, { new: true });
     if (!staff) return sendError(res, 404, 'Staff not found');
-    return sendSuccess(res, 200, 'Staff deactivated');
+    return sendSuccess(res, 200, 'Staff deleted successfully');
   } catch (error) { next(error); }
 };
 

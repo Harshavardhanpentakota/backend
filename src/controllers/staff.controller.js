@@ -118,7 +118,7 @@ const deleteStaff = async (req, res, next) => {
     const oldStaff = await Staff.findById(req.params.id);
     const staff = await Staff.findByIdAndUpdate(
       req.params.id,
-      { isActive: false },
+      { isDeleted: true, isActive: false },
       { new: true }
     );
     if (!staff) return sendError(res, 404, 'Staff member not found');
@@ -139,10 +139,10 @@ const deleteStaff = async (req, res, next) => {
       entityType: 'Staff',
       description: `Staff member ${staff.name} deleted.`,
       previousData: oldStaff ? oldStaff.toObject() : null,
-      newData: { isActive: false }
+      newData: { isDeleted: true, isActive: false }
     });
 
-    return sendSuccess(res, 200, 'Staff member deactivated');
+    return sendSuccess(res, 200, 'Staff member deleted successfully');
   } catch (error) {
     next(error);
   }

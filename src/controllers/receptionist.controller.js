@@ -262,12 +262,14 @@ const checkIn = async (req, res, next) => {
 
     let advancePaid = booking.advancePaid;
     let advancePct = settings.advancePaymentPercent;
+    let isOfflineAdvance = false;
 
     if (!advancePaid || advancePaid <= 0) {
       advancePaid = Math.round((booking.subtotal * advancePct) / 100);
       booking.advancePaid = advancePaid;
       booking.advancePaidAt = new Date();
       booking.advancePaymentMethod = advancePaymentMethod;
+      isOfflineAdvance = true;
     } else {
       advancePct = Math.round((advancePaid / booking.subtotal) * 100);
     }
@@ -275,6 +277,21 @@ const checkIn = async (req, res, next) => {
     booking.status = BOOKING_STATUS.CHECKED_IN;
     booking.actualCheckIn = new Date();
     await booking.save();
+
+    if (isOfflineAdvance && advancePaid > 0) {
+      const Payment = require('../models/Payment');
+      const { PAYMENT_STATUS } = require('../constants');
+      await Payment.create({
+        booking: booking._id,
+        user: booking.user,
+        amount: advancePaid,
+        method: advancePaymentMethod,
+        status: PAYMENT_STATUS.PAID,
+        transactionId: `ADV-${advancePaymentMethod.toUpperCase()}-${Date.now()}`,
+        paidAt: new Date(),
+        notes: 'Advance payment collected during check-in',
+      });
+    }
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
 
@@ -441,8 +458,24 @@ const checkOut = async (req, res, next) => {
     booking.tax = inv.tax;
     booking.totalAmount = inv.totalAmount;
     booking.status = BOOKING_STATUS.CHECKED_OUT;
+    booking.paymentStatus = 'paid';
     booking.actualCheckOut = new Date();
     await booking.save();
+
+    if (inv.balanceDue > 0) {
+      const Payment = require('../models/Payment');
+      const { PAYMENT_STATUS } = require('../constants');
+      await Payment.create({
+        booking: booking._id,
+        user: booking.user?._id || booking.user || booking.createdBy,
+        amount: inv.balanceDue,
+        method: balancePaymentMethod,
+        status: PAYMENT_STATUS.PAID,
+        transactionId: `OUT-${balancePaymentMethod.toUpperCase()}-${Date.now()}`,
+        paidAt: new Date(),
+        notes: 'Balance payment collected during checkout',
+      });
+    }
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.AVAILABLE });
     if (booking.user?._id) {
