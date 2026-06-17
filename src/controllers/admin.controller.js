@@ -699,8 +699,16 @@ const deleteInvoice = async (req, res, next) => {
   try {
     const { id } = req.params;
     const Invoice = require('../models/Invoice');
+    const Booking = require('../models/Booking');
+    const { BOOKING_STATUS } = require('../constants');
+
     const invoice = await Invoice.findById(id);
     if (!invoice) return sendError(res, 404, 'Invoice not found');
+
+    const booking = await Booking.findById(invoice.booking);
+    if (booking && booking.status === BOOKING_STATUS.CHECKED_IN) {
+      return sendError(res, 400, 'Guest is in stay, cannot delete the invoice');
+    }
 
     await Invoice.findByIdAndUpdate(id, { isDeleted: true });
 

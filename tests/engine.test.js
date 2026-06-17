@@ -429,6 +429,69 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       expect(rawDoc).toBeDefined();
       expect(rawDoc.isDeleted).toBe(true);
     });
+
+    it('should prevent soft-deleting invoice when guest is currently checked_in', async () => {
+      // 1. Create a booking in checked_in status
+      const booking = await Booking.create({
+        bookingId: 'BK-INVDELETE-TEST',
+        user: regularUser._id,
+        room: suiteRoom1._id,
+        roomType: 'Suite',
+        pricePerNight: 4000,
+        checkInDate: new Date(),
+        checkOutDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
+        guests: 2,
+        nights: 2,
+        subtotal: 8000,
+        totalAmount: 8000,
+        status: 'checked_in',
+      });
+
+      // 2. Create an invoice for that booking
+      const invoice = await Invoice.create({
+        invoiceNumber: 'INV-DELETE-TEST',
+        booking: booking._id,
+        user: regularUser._id,
+        room: suiteRoom1._id,
+        roomSubtotal: 8000,
+        subtotal: 8000,
+        cgstPercentage: 6,
+        sgstPercentage: 6,
+        cgst: 480,
+        sgst: 480,
+        tax: 960,
+        totalAmount: 8960,
+        advancePaid: 800,
+        balanceDue: 8160,
+      });
+
+      // 3. Attempt to delete the invoice via API
+      const res = await request(app)
+        .delete(`/api/admin/invoices/${invoice._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      // Should decline with 400 and state the reason
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Guest is in stay, cannot delete the invoice');
+
+      // Verify invoice was NOT soft-deleted in database
+      const dbInvoice = await Invoice.findById(invoice._id);
+      expect(dbInvoice).toBeDefined();
+      expect(dbInvoice.isDeleted).toBe(false);
+
+      // 4. Change booking status to checked_out and check deletion succeeds
+      await Booking.findByIdAndUpdate(booking._id, { status: 'checked_out' });
+      const deleteRes = await request(app)
+        .delete(`/api/admin/invoices/${invoice._id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(deleteRes.status).toBe(200);
+      expect(deleteRes.body.success).toBe(true);
+
+      const deletedInvoice = await Invoice.findById(invoice._id);
+      expect(deletedInvoice).toBeNull(); // soft-deleted and filtered out
+    });
   });
 
   describe('Password-Verified Refund Logic Tests', () => {

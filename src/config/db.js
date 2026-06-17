@@ -18,6 +18,22 @@ const connectDB = async () => {
 
     logger.info(`MongoDB connected: ${conn.connection.host} — DB: ${conn.connection.name}`);
 
+    // Drop non-sparse unique email index on users if it is not sparse
+    try {
+      const db = mongoose.connection.db;
+      const collections = await db.listCollections({ name: 'users' }).toArray();
+      if (collections.length > 0) {
+        const indexes = await db.collection('users').indexes();
+        const emailIndex = indexes.find(idx => idx.name === 'email_1');
+        if (emailIndex && !emailIndex.sparse) {
+          logger.info('Dropping non-sparse email index on users collection...');
+          await db.collection('users').dropIndex('email_1');
+        }
+      }
+    } catch (indexErr) {
+      logger.warn(`Could not check/drop email index: ${indexErr.message}`);
+    }
+
     mongoose.connection.on('disconnected', () => {
       logger.warn('MongoDB disconnected. Attempting to reconnect...');
     });
