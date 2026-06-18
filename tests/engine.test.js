@@ -623,5 +623,54 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       expect(invoice.tax).toBe(660);
       expect(invoice.totalAmount).toBe(6160);
     });
+
+    it('should allow altering discount at checkout including reducing it to 0', async () => {
+      const bookRes = await request(app)
+        .post('/api/reception/book')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          roomId: suiteRoom2._id.toString(),
+          checkInDate: '2026-07-25T12:00:00.000Z',
+          checkOutDate: '2026-07-27T12:00:00.000Z',
+          guests: 2,
+          guestDetails: {
+            name: 'Offline Alter Discount Guest',
+            phone: '9999999998',
+            email: 'offline_alter@test.com',
+          },
+          customPricePerNight: 3000,
+          discount: 1000,
+          source: 'offline',
+        });
+      expect(bookRes.status).toBe(201);
+
+      const booking = await Booking.findOne({ bookingId: bookRes.body.data.bookingId });
+      expect(booking).toBeDefined();
+
+      const checkinRes = await request(app)
+        .post('/api/reception/checkin')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          bookingId: booking.bookingId,
+          roomId: suiteRoom2._id.toString(),
+        });
+      expect(checkinRes.status).toBe(200);
+
+      const checkoutRes = await request(app)
+        .post('/api/reception/checkout')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          bookingId: booking.bookingId,
+          discount: 0,
+        });
+      expect(checkoutRes.status).toBe(200);
+
+      const invoice = await Invoice.findOne({ booking: booking._id });
+      expect(invoice).toBeDefined();
+      expect(invoice.discount).toBe(0);
+      expect(invoice.roomSubtotal).toBe(6000);
+      expect(invoice.tax).toBe(720);
+      expect(invoice.totalAmount).toBe(6720);
+    });
   });
 });

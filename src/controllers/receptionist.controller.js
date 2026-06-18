@@ -24,12 +24,12 @@ const populateBooking = (query) =>
     .populate('user', 'name email phone')
     .populate('extraCharges.addedBy', 'name');
 
-const buildInvoiceData = (booking, settings, customRoomSubtotal, discount = 0) => {
+const buildInvoiceData = (booking, settings, customRoomSubtotal, discount) => {
   const roomSubtotal = customRoomSubtotal !== undefined ? Number(customRoomSubtotal) : booking.subtotal;
   const extraChargesTotal = (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
   const subtotal = roomSubtotal + extraChargesTotal;
   
-  const discountVal = Number(discount || booking.discount || 0);
+  const discountVal = (discount !== undefined && discount !== null) ? Number(discount) : (booking.discount || 0);
   const discountedSubtotal = Math.max(0, subtotal - discountVal);
   
   const cgstPct = settings.cgstPercentage;
