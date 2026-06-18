@@ -67,6 +67,7 @@ const createOfflineBooking = async (req, res, next) => {
     const {
       roomId, checkInDate, checkOutDate, guests,
       guestDetails, specialRequests, source,
+      customPricePerNight, discount,
     } = req.body;
 
     const checkIn = new Date(checkInDate);
@@ -109,8 +110,10 @@ const createOfflineBooking = async (req, res, next) => {
     }
 
     const nights = calculateNights(checkIn, checkOut);
-    const effectivePrice = room.customPrice ?? room.price;
+    const effectivePrice = customPricePerNight !== undefined && customPricePerNight !== null && customPricePerNight !== '' ? Number(customPricePerNight) : (room.customPrice ?? room.price);
     const subtotal = effectivePrice * nights;
+    const bookingDiscount = discount !== undefined && discount !== null && discount !== '' ? Number(discount) : 0;
+    const totalAmount = Math.max(0, subtotal - bookingDiscount);
 
     const booking = await Booking.create({
       bookingId: generateBookingId(),
@@ -123,8 +126,9 @@ const createOfflineBooking = async (req, res, next) => {
       guests,
       nights,
       subtotal,
+      discount: bookingDiscount,
       tax: 0,
-      totalAmount: subtotal,
+      totalAmount,
       status: BOOKING_STATUS.CONFIRMED,
       source: source || BOOKING_SOURCE.OFFLINE,
       createdBy: req.user._id,
@@ -246,14 +250,15 @@ const checkIn = async (req, res, next) => {
 
     const settings = await HotelSettings.getSettings();
     const assignedRoom = booking.room;
-    const effectivePrice = assignedRoom.customPrice ?? assignedRoom.price;
+    const effectivePrice = booking.source === 'offline' ? booking.pricePerNight : (assignedRoom.customPrice ?? assignedRoom.price);
     const subtotal = effectivePrice * booking.nights;
     const cgstPct = settings.cgstPercentage || 6;
     const sgstPct = settings.sgstPercentage || 6;
     const cgst = Math.round(subtotal * cgstPct) / 100;
     const sgst = Math.round(subtotal * sgstPct) / 100;
     const tax = cgst + sgst;
-    const totalAmount = subtotal + tax;
+    const bookingDiscount = booking.discount || 0;
+    const totalAmount = Math.max(0, subtotal + tax - bookingDiscount);
 
     booking.pricePerNight = effectivePrice;
     booking.subtotal = subtotal;

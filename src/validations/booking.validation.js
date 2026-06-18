@@ -88,6 +88,14 @@ const offlineBookingValidation = [
     .optional()
     .trim()
     .isLength({ max: 300 }).withMessage('Special requests must not exceed 300 characters'),
+
+  body('customPricePerNight')
+    .optional({ checkFalsy: true })
+    .isFloat({ min: 0 }).withMessage('Custom price per night must be a non-negative number'),
+
+  body('discount')
+    .optional({ checkFalsy: true })
+    .isFloat({ min: 0 }).withMessage('Discount must be a non-negative number'),
 ];
 
 const cancelBookingValidation = [

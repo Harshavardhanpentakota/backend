@@ -553,4 +553,75 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
       expect(updatedBooking.paymentStatus).toBe('refunded');
     });
   });
+
+  describe('Offline Booking with Custom Pricing & Discount Tests', () => {
+    it('should create offline booking with custom price per night and discount successfully', async () => {
+      const res = await request(app)
+        .post('/api/reception/book')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          roomId: suiteRoom2._id.toString(),
+          checkInDate: '2026-07-20T12:00:00.000Z',
+          checkOutDate: '2026-07-22T12:00:00.000Z',
+          guests: 2,
+          guestDetails: {
+            name: 'Offline Guest',
+            phone: '9999999999',
+            email: 'offline_guest@test.com',
+          },
+          customPricePerNight: 3000,
+          discount: 500,
+          source: 'offline',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+
+      const booking = await Booking.findOne({ bookingId: res.body.data.bookingId });
+      expect(booking).toBeDefined();
+      expect(booking.pricePerNight).toBe(3000);
+      expect(booking.nights).toBe(2);
+      expect(booking.subtotal).toBe(6000); // 3000 * 2
+      expect(booking.discount).toBe(500);
+      expect(booking.totalAmount).toBe(5500); // 6000 - 500
+    });
+
+    it('should check in and check out offline booking preserving custom price and discount', async () => {
+      const booking = await Booking.findOne({ 'guestDetails.name': 'Offline Guest' });
+      expect(booking).toBeDefined();
+
+      const checkinRes = await request(app)
+        .post('/api/reception/checkin')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          bookingId: booking.bookingId,
+          roomId: suiteRoom2._id.toString(),
+        });
+
+      expect(checkinRes.status).toBe(200);
+
+      const bookingAfterCheckin = await Booking.findById(booking._id);
+      expect(bookingAfterCheckin.pricePerNight).toBe(3000);
+      expect(bookingAfterCheckin.discount).toBe(500);
+      expect(bookingAfterCheckin.subtotal).toBe(6000);
+      expect(bookingAfterCheckin.tax).toBe(720); // 12% of 6000
+      expect(bookingAfterCheckin.totalAmount).toBe(6220); // 6000 + 720 - 500
+
+      const checkoutRes = await request(app)
+        .post('/api/reception/checkout')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          bookingId: booking.bookingId,
+        });
+
+      expect(checkoutRes.status).toBe(200);
+
+      const invoice = await Invoice.findOne({ booking: booking._id });
+      expect(invoice).toBeDefined();
+      expect(invoice.roomSubtotal).toBe(6000);
+      expect(invoice.discount).toBe(500);
+      expect(invoice.tax).toBe(660);
+      expect(invoice.totalAmount).toBe(6160);
+    });
+  });
 });
