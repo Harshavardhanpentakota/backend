@@ -69,7 +69,7 @@ const downloadInvoicePDF = async (req, res, next) => {
 // GET /api/invoices  — list all invoices (admin / receptionist)
 const listInvoices = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, search = '', startDate, endDate } = req.query;
+    const { page = 1, limit = 20, search = '', startDate, endDate, sortBy = 'date', sortOrder = 'desc' } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
     const limitNum = Math.min(Number(limit), 100);
 
@@ -96,17 +96,36 @@ const listInvoices = async (req, res, next) => {
       ];
     }
 
-    const [invoices, total] = await Promise.all([
-      Invoice.find(filter)
-        .populate('booking', 'bookingId checkInDate checkOutDate actualCheckOut nights status')
-        .populate('user', 'name email phone')
-        .populate('room', 'roomNumber type')
-        .sort({ generatedAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      Invoice.countDocuments(filter),
-    ]);
+    let invoices;
+    const total = await Invoice.countDocuments(filter);
+    const orderMultiplier = sortOrder === 'asc' ? 1 : -1;
+
+    const queryBuilder = Invoice.find(filter)
+      .populate('booking', 'bookingId checkInDate checkOutDate actualCheckOut nights status')
+      .populate('user', 'name email phone')
+      .populate('room', 'roomNumber type');
+
+    if (sortBy === 'guestName') {
+      const allInvoices = await queryBuilder.lean();
+      allInvoices.sort((a, b) => {
+        const nameA = a.user?.name || '';
+        const nameB = b.user?.name || '';
+        return nameA.localeCompare(nameB) * orderMultiplier;
+      });
+      invoices = allInvoices.slice(skip, skip + limitNum);
+    } else {
+      let dbSort = { generatedAt: -1 };
+      if (sortBy === 'invoiceNumber') {
+        dbSort = { invoiceNumber: orderMultiplier };
+      } else if (sortBy === 'amount') {
+        dbSort = { totalAmount: orderMultiplier };
+      } else if (sortBy === 'balance') {
+        dbSort = { balanceDue: orderMultiplier };
+      } else if (sortBy === 'date') {
+        dbSort = { generatedAt: orderMultiplier };
+      }
+      invoices = await queryBuilder.sort(dbSort).skip(skip).limit(limitNum).lean();
+    }
 
     return sendSuccess(res, 200, 'Invoices fetched', invoices, {
       total,
