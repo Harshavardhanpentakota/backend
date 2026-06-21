@@ -98,7 +98,12 @@ const createOfflineBooking = async (req, res, next) => {
         guestUser = await User.findOne({ phone: guestPhone });
       }
 
-      if (!guestUser) {
+      if (guestUser) {
+        guestUser.name = guestDetails.name;
+        if (guestEmail && !guestUser.email) guestUser.email = guestEmail;
+        if (guestPhone && !guestUser.phone) guestUser.phone = guestPhone;
+        await guestUser.save();
+      } else {
         guestUser = await User.create({
           name: guestDetails.name,
           email: guestEmail || undefined,
@@ -267,23 +272,14 @@ const checkIn = async (req, res, next) => {
 
     let advancePaid = booking.advancePaid;
     let advancePct = settings.advancePaymentPercent;
-    let isOfflineAdvance = false;
+    // Walk-in (offline) bookings: no advance collected — full payment at check-out
+    const isOfflineBooking = booking.source === 'offline';
 
-    if (!advancePaid || advancePaid <= 0) {
+    if (!isOfflineBooking && (!advancePaid || advancePaid <= 0)) {
       advancePaid = Math.round((booking.subtotal * advancePct) / 100);
       booking.advancePaid = advancePaid;
       booking.advancePaidAt = new Date();
       booking.advancePaymentMethod = advancePaymentMethod;
-      isOfflineAdvance = true;
-    } else {
-      advancePct = Math.round((advancePaid / booking.subtotal) * 100);
-    }
-
-    booking.status = BOOKING_STATUS.CHECKED_IN;
-    booking.actualCheckIn = new Date();
-    await booking.save();
-
-    if (isOfflineAdvance && advancePaid > 0) {
       const Payment = require('../models/Payment');
       const { PAYMENT_STATUS } = require('../constants');
       await Payment.create({
@@ -296,7 +292,17 @@ const checkIn = async (req, res, next) => {
         paidAt: new Date(),
         notes: 'Advance payment collected during check-in',
       });
+    } else if (isOfflineBooking) {
+      // Walk-in: no advance; payment fully due at check-out
+      advancePaid = 0;
+      advancePct = 0;
+    } else {
+      advancePct = booking.subtotal > 0 ? Math.round((advancePaid / booking.subtotal) * 100) : 0;
     }
+
+    booking.status = BOOKING_STATUS.CHECKED_IN;
+    booking.actualCheckIn = new Date();
+    await booking.save();
 
     await Room.findByIdAndUpdate(booking.room._id, { status: ROOM_STATUS.OCCUPIED });
 

@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const {
   createRazorpayOrder, verifyRazorpayPayment, recordOfflinePayment,
-  getPaymentByBooking, getAllPayments, refundPayment,
+  getPaymentByBooking, getAllPayments, refundPayment, exportPayments,
 } = require('../controllers/payment.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
 const { ROLES } = require('../constants');
@@ -16,6 +16,9 @@ router.use(authenticate);
 
 // All payments list (admin + receptionist)
 router.get('/', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), getAllPayments);
+
+// Export payments as CSV (admin + receptionist) — must be before /:bookingId
+router.get('/export', authorize(ROLES.ADMIN, ROLES.RECEPTIONIST), exportPayments);
 
 // Razorpay flow (users)
 router.post('/razorpay/order', [body('bookingId').isMongoId().withMessage('Invalid booking ID')], validate, createRazorpayOrder);

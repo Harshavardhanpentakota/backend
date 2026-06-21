@@ -37,6 +37,7 @@ const getDashboard = async (req, res, next) => {
       revenueResult,
       monthlyRevenue,
       recentBookings,
+      recentActivities,
     ] = await Promise.all([
       Room.countDocuments({ isActive: true }),
       Room.countDocuments({ status: ROOM_STATUS.OCCUPIED, isActive: true }),
@@ -49,22 +50,23 @@ const getDashboard = async (req, res, next) => {
       Booking.countDocuments({ status: BOOKING_STATUS.CONFIRMED }),
       User.countDocuments({ role: 'user', isActive: true }),
       Staff.countDocuments({ isActive: true }),
-      // Revenue from completed/checked-out bookings (totalAmount)
-      Booking.aggregate([
-        { $match: { status: { $in: [BOOKING_STATUS.CHECKED_OUT, BOOKING_STATUS.COMPLETED] } } },
-        { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+      // Revenue from paid Payment records (matches what Payments page shows)
+      Payment.aggregate([
+        { $match: { status: PAYMENT_STATUS.PAID } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
-      Booking.aggregate([
+      // Monthly revenue (current month) from paid Payment records
+      Payment.aggregate([
         {
           $match: {
-            status: { $in: [BOOKING_STATUS.CHECKED_OUT, BOOKING_STATUS.COMPLETED] },
-            checkOutDate: {
+            status: PAYMENT_STATUS.PAID,
+            paidAt: {
               $gte: new Date(today.getFullYear(), today.getMonth(), 1),
               $lt: new Date(today.getFullYear(), today.getMonth() + 1, 1),
             },
           },
         },
-        { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
       Booking.find()
         .sort({ createdAt: -1 })
@@ -88,22 +90,7 @@ const getDashboard = async (req, res, next) => {
       revenue: { allTime: totalRevenue, currentMonth: currentMonthRevenue },
       occupancyRate: parseFloat(occupancyRate),
       recentBookings,
-      recentActivities: revenueResult[14] || [], // Wait, let's match the index. Since there are 14 items before (index 0 to 13), the 15th item (ActivityLog.find()) is at index 14. Wait, let's check:
-      // index 0: totalRooms
-      // index 1: occupiedRooms
-      // index 2: availableRooms
-      // index 3: maintenanceRooms
-      // index 4: totalBookings
-      // index 5: todayCheckIns
-      // index 6: todayCheckOuts
-      // index 7: pendingBookings
-      // index 8: confirmedBookings
-      // index 9: totalUsers
-      // index 10: totalStaff
-      // index 11: revenueResult
-      // index 12: monthlyRevenue
-      // index 13: recentBookings
-      // index 14: ActivityLog.find(). So index 14 is correct! Or we can assign a variable for clarity. Let's make it explicit.
+      recentActivities,
     });
   } catch (error) {
     next(error);
@@ -302,7 +289,7 @@ const getRoomsAdmin = async (req, res, next) => {
 // PATCH /api/admin/rooms/:id — full room edit (price, amenities, description, status, etc.)
 const updateRoomAdmin = async (req, res, next) => {
   try {
-    const allowed = ['price', 'status', 'description', 'amenities', 'beds', 'size', 'capacity', 'isActive', 'customPrice'];
+    const allowed = ['roomNumber', 'floor', 'type', 'price', 'status', 'description', 'amenities', 'beds', 'size', 'capacity', 'isActive', 'customPrice'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
@@ -648,12 +635,24 @@ const changeUserPassword = async (req, res, next) => {
 const deleteBooking = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const mongoose = require('mongoose');
+    const bookingObjectId = new mongoose.Types.ObjectId(id);
+
     const booking = await Booking.findById(id);
     if (!booking) return sendError(res, 404, 'Booking not found');
 
-    if (booking.status === BOOKING_STATUS.CHECKED_IN && booking.room) {
+    if (booking.room) {
       await Room.findByIdAndUpdate(booking.room, { status: ROOM_STATUS.AVAILABLE });
     }
+
+    if (booking.user) {
+      await User.findByIdAndUpdate(booking.user, { isDeleted: true });
+    }
+
+    await Payment.updateMany({ booking: bookingObjectId }, { isDeleted: true });
+
+    const Invoice = require('../models/Invoice');
+    await Invoice.updateMany({ booking: bookingObjectId }, { isDeleted: true });
 
     await Booking.findByIdAndUpdate(id, { isDeleted: true });
 
@@ -663,7 +662,7 @@ const deleteBooking = async (req, res, next) => {
       module: 'Bookings',
       entityId: id,
       entityType: 'Booking',
-      description: `Admin deleted booking #${booking.bookingId}`
+      description: `Admin deleted booking #${booking.bookingId} and associated user, payments, and invoices.`
     });
 
     return sendSuccess(res, 200, 'Booking deleted successfully');

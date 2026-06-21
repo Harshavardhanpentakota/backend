@@ -417,9 +417,27 @@ const getAllPayments = async (req, res, next) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    const [payments, total] = await Promise.all([
+    const [payments, total, aggregateResult] = await Promise.all([
       query,
       Payment.countDocuments(filter),
+      // Aggregate totals across ALL filtered payments (not just this page)
+      Payment.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            totalPaidAmount: {
+              $sum: { $cond: [{ $eq: ['$status', 'paid'] }, '$amount', 0] }
+            },
+            totalRefundedAmount: {
+              $sum: { $cond: [{ $in: ['$status', ['refunded', 'partially_refunded']] }, { $ifNull: ['$refundAmount', '$amount'] }, 0] }
+            },
+            totalPendingCount: {
+              $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+            },
+          }
+        }
+      ]),
     ]);
 
     // Client-side search on populated fields (booking ID / guest name)
@@ -435,11 +453,16 @@ const getAllPayments = async (req, res, next) => {
       });
     }
 
+    const agg = aggregateResult[0] || { totalPaidAmount: 0, totalRefundedAmount: 0, totalPendingCount: 0 };
+
     return sendSuccess(res, 200, 'Payments fetched', results, {
       total,
       page: parseInt(page),
       limit: parseInt(limit),
       pages: Math.ceil(total / parseInt(limit)),
+      totalPaidAmount: agg.totalPaidAmount,
+      totalRefundedAmount: agg.totalRefundedAmount,
+      totalPendingCount: agg.totalPendingCount,
     });
   } catch (error) {
     next(error);
@@ -567,4 +590,68 @@ const getPaymentByBooking = async (req, res, next) => {
   }
 };
 
-module.exports = { createRazorpayOrder, verifyRazorpayPayment, recordOfflinePayment, getPaymentByBooking, getAllPayments, refundPayment };
+// GET /api/payments/export  (admin / receptionist — export as CSV)
+const exportPayments = async (req, res, next) => {
+  try {
+    const { status, method, startDate, endDate, search } = req.query;
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (method) filter.method = method;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    const payments = await Payment.find(filter)
+      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status')
+      .populate('user', 'name email phone')
+      .sort({ createdAt: -1 })
+      .limit(10000);
+
+    // Apply search filter
+    let results = payments;
+    if (search) {
+      const q = search.toLowerCase();
+      results = payments.filter((p) => {
+        const bookingId = (p.booking?.bookingId ?? '').toLowerCase();
+        const guestName = (p.user?.name ?? '').toLowerCase();
+        const guestPhone = (p.user?.phone ?? '').toLowerCase();
+        const txn = (p.transactionId ?? '').toLowerCase();
+        return bookingId.includes(q) || guestName.includes(q) || guestPhone.includes(q) || txn.includes(q);
+      });
+    }
+
+    // Build CSV
+    const escapeCSV = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const headers = ['Date', 'Booking ID', 'Guest Name', 'Guest Phone', 'Method', 'Amount (₹)', 'Status', 'Transaction ID', 'Refund Amount (₹)', 'Notes'];
+    const rows = results.map((p) => [
+      p.paidAt ? new Date(p.paidAt).toISOString() : new Date(p.createdAt).toISOString(),
+      p.booking?.bookingId ?? '',
+      p.user?.name ?? 'Guest',
+      p.user?.phone ?? p.user?.email ?? '',
+      p.method,
+      p.amount,
+      p.status,
+      p.razorpayPaymentId ?? p.transactionId ?? '',
+      p.refundAmount ?? '',
+      p.notes ?? '',
+    ].map(escapeCSV).join(','));
+
+    const csvContent = [headers.map(escapeCSV).join(','), ...rows].join('\n');
+    const filename = `payments_export_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send('\uFEFF' + csvContent); // BOM for Excel compatibility
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { createRazorpayOrder, verifyRazorpayPayment, recordOfflinePayment, getPaymentByBooking, getAllPayments, refundPayment, exportPayments };

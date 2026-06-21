@@ -1,5 +1,6 @@
 'use strict';
 
+// Trigger reload for cascade delete updates (v2)
 require('dotenv').config();
 
 const app = require('./src/app');
