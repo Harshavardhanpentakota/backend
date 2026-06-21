@@ -77,6 +77,11 @@ const createBooking = async (req, res, next) => {
       status: BOOKING_STATUS.PENDING,   // confirmed only after advance payment
       source: BOOKING_SOURCE.ONLINE,
       specialRequests,
+      guestDetails: {
+        name: req.user.name,
+        email: req.user.email || undefined,
+        phone: req.user.phone || undefined,
+      },
     });
 
     // Send confirmation email (non-blocking)

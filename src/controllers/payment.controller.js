@@ -411,7 +411,7 @@ const getAllPayments = async (req, res, next) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     let query = Payment.find(filter)
-      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status')
+      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status guestDetails')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -446,8 +446,8 @@ const getAllPayments = async (req, res, next) => {
       const q = search.toLowerCase();
       results = payments.filter((p) => {
         const bookingId = (p.booking?.bookingId ?? '').toLowerCase();
-        const guestName = (p.user?.name ?? '').toLowerCase();
-        const guestPhone = (p.user?.phone ?? '').toLowerCase();
+        const guestName = (p.booking?.guestDetails?.name ?? p.user?.name ?? '').toLowerCase();
+        const guestPhone = (p.booking?.guestDetails?.phone ?? p.user?.phone ?? '').toLowerCase();
         const txn = (p.transactionId ?? '').toLowerCase();
         return bookingId.includes(q) || guestName.includes(q) || guestPhone.includes(q) || txn.includes(q);
       });
@@ -609,7 +609,7 @@ const exportPayments = async (req, res, next) => {
     }
 
     const payments = await Payment.find(filter)
-      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status')
+      .populate('booking', 'bookingId roomType checkInDate checkOutDate totalAmount status guestDetails')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
       .limit(10000);
@@ -620,8 +620,8 @@ const exportPayments = async (req, res, next) => {
       const q = search.toLowerCase();
       results = payments.filter((p) => {
         const bookingId = (p.booking?.bookingId ?? '').toLowerCase();
-        const guestName = (p.user?.name ?? '').toLowerCase();
-        const guestPhone = (p.user?.phone ?? '').toLowerCase();
+        const guestName = (p.booking?.guestDetails?.name ?? p.user?.name ?? '').toLowerCase();
+        const guestPhone = (p.booking?.guestDetails?.phone ?? p.user?.phone ?? '').toLowerCase();
         const txn = (p.transactionId ?? '').toLowerCase();
         return bookingId.includes(q) || guestName.includes(q) || guestPhone.includes(q) || txn.includes(q);
       });
@@ -633,8 +633,8 @@ const exportPayments = async (req, res, next) => {
     const rows = results.map((p) => [
       p.paidAt ? new Date(p.paidAt).toISOString() : new Date(p.createdAt).toISOString(),
       p.booking?.bookingId ?? '',
-      p.user?.name ?? 'Guest',
-      p.user?.phone ?? p.user?.email ?? '',
+      p.booking?.guestDetails?.name ?? p.user?.name ?? 'Guest',
+      p.booking?.guestDetails?.phone ?? p.user?.phone ?? p.user?.email ?? '',
       p.method,
       p.amount,
       p.status,

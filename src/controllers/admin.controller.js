@@ -646,7 +646,14 @@ const deleteBooking = async (req, res, next) => {
     }
 
     if (booking.user) {
-      await User.findByIdAndUpdate(booking.user, { isDeleted: true });
+      const otherBookings = await Booking.findOne({
+        user: booking.user,
+        _id: { $ne: bookingObjectId },
+        isDeleted: { $ne: true }
+      });
+      if (!otherBookings) {
+        await User.findByIdAndUpdate(booking.user, { isDeleted: true });
+      }
     }
 
     await Payment.updateMany({ booking: bookingObjectId }, { isDeleted: true });
