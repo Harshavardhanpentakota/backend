@@ -756,6 +756,112 @@ const deleteUser = async (req, res, next) => {
   }
 };
 
+const clearDataAdmin = async (req, res, next) => {
+  try {
+    const { dataTypes, startDate, endDate, password, clearAllDates } = req.body;
+
+    // Verify password
+    const adminUser = await User.findById(req.user._id).select('+password');
+    if (!adminUser) return sendError(res, 404, 'Admin user not found');
+
+    const isMatch = await adminUser.comparePassword(password);
+    if (!isMatch) {
+      return sendError(res, 400, 'Incorrect password. Data clearance cancelled.');
+    }
+
+    const dateFilter = {};
+    let rangeStr = 'all time';
+
+    if (!clearAllDates) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter.createdAt = { $gte: start, $lte: end };
+      rangeStr = `from ${start.toISOString().split('T')[0]} to ${end.toISOString().split('T')[0]}`;
+    }
+
+    const results = {};
+
+    for (const type of dataTypes) {
+      if (type === 'payments') {
+        const resPay = await Payment.updateMany(
+          dateFilter,
+          { isDeleted: true }
+        );
+        results.payments = resPay.modifiedCount;
+      }
+      
+      if (type === 'bookings') {
+        // Find bookings in range/all-time that aren't already deleted to free their rooms
+        const bookingsToClear = await Booking.find({
+          ...dateFilter,
+          isDeleted: { $ne: true }
+        });
+        
+        const roomIdsToFree = bookingsToClear
+          .filter(b => b.room)
+          .map(b => b.room);
+          
+        if (roomIdsToFree.length > 0) {
+          await Room.updateMany(
+            { _id: { $in: roomIdsToFree } },
+            { status: ROOM_STATUS.AVAILABLE }
+          );
+        }
+
+        const resBook = await Booking.updateMany(
+          dateFilter,
+          { isDeleted: true }
+        );
+        results.bookings = resBook.modifiedCount;
+      }
+
+      if (type === 'invoices') {
+        const Invoice = require('../models/Invoice');
+        const resInv = await Invoice.updateMany(
+          dateFilter,
+          { isDeleted: true }
+        );
+        results.invoices = resInv.modifiedCount;
+      }
+
+      if (type === 'userData') {
+        const resUser = await User.updateMany(
+          { role: 'user', ...dateFilter },
+          { isDeleted: true }
+        );
+        results.userData = resUser.modifiedCount;
+      }
+
+      if (type === 'activityLogs') {
+        const resAct = await ActivityLog.deleteMany(dateFilter);
+        results.activityLogs = resAct.deletedCount;
+      }
+    }
+
+    // Log this action to Activity History
+    await logActivity({
+      req,
+      action: 'Data Cleared by Admin',
+      module: 'Settings',
+      description: `Admin cleared data types [${dataTypes.join(', ')}] ${rangeStr}. Cleared count details: ${JSON.stringify(results)}`,
+      newData: { dataTypes, clearAllDates, results }
+    });
+
+    const logger = require('../utils/logger');
+    if (logger && typeof logger.info === 'function') {
+      logger.info(`Admin ${adminUser.name} cleared data: ${JSON.stringify(results)}`);
+    }
+
+    return sendSuccess(res, 200, 'Data cleared successfully', results);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getDashboard,
   getRevenueReport,
@@ -781,4 +887,5 @@ module.exports = {
   // Deletions
   deletePayment,
   deleteInvoice,
+  clearDataAdmin,
 };

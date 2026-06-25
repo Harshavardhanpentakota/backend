@@ -73,7 +73,7 @@ staffSchema.index({ role: 1, shift: 1 });
 // employeeId is already indexed via unique: true in the schema definition
 
 // Soft delete middleware
-staffSchema.pre(/^find/, function (next) {
+staffSchema.pre(/^(find|count)/, function (next) {
   this.where({ isDeleted: { $ne: true } });
   next();
 });

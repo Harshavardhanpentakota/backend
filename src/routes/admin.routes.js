@@ -10,7 +10,7 @@ const {
   getActiveGuests, changeGuestRoom,
   getSettings, updateSettings,
   getActivityLogs, exportActivityLogs,
-  deleteBooking, deletePayment, deleteInvoice, deleteUser,
+  deleteBooking, deletePayment, deleteInvoice, deleteUser, clearDataAdmin,
 } = require('../controllers/admin.controller');
 const { authenticate, authorize } = require('../middlewares/auth');
 const { ROLES } = require('../constants');
@@ -65,5 +65,30 @@ router.delete('/bookings/:id', [param('id').isMongoId()], validate, deleteBookin
 router.delete('/payments/:id', [param('id').isMongoId()], validate, deletePayment);
 router.delete('/invoices/:id', [param('id').isMongoId()], validate, deleteInvoice);
 router.delete('/users/:id', [param('id').isMongoId()], validate, deleteUser);
+
+// Bulk data management (admin-only)
+router.post('/clear-data', [
+  body('dataTypes').isArray({ min: 1 }).withMessage('At least one data type must be selected'),
+  body('clearAllDates').isBoolean().optional(),
+  body('startDate').custom((value, { req }) => {
+    if (!req.body.clearAllDates && !value) {
+      throw new Error('Start date is required when clearAllDates is false');
+    }
+    if (value && isNaN(Date.parse(value))) {
+      throw new Error('Start date must be a valid date');
+    }
+    return true;
+  }),
+  body('endDate').custom((value, { req }) => {
+    if (!req.body.clearAllDates && !value) {
+      throw new Error('End date is required when clearAllDates is false');
+    }
+    if (value && isNaN(Date.parse(value))) {
+      throw new Error('End date must be a valid date');
+    }
+    return true;
+  }),
+  body('password').notEmpty().withMessage('Password verification is required')
+], validate, clearDataAdmin);
 
 module.exports = router;

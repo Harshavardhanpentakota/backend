@@ -148,7 +148,7 @@ const bookingSchema = new mongoose.Schema(
 );
 
 // Soft delete middleware
-bookingSchema.pre(/^find/, function (next) {
+bookingSchema.pre(/^(find|count)/, function (next) {
   this.where({ isDeleted: { $ne: true } });
   next();
 });

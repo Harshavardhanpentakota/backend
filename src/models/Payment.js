@@ -76,7 +76,7 @@ const paymentSchema = new mongoose.Schema(
 );
 
 // Soft delete middleware
-paymentSchema.pre(/^find/, function (next) {
+paymentSchema.pre(/^(find|count)/, function (next) {
   this.where({ isDeleted: { $ne: true } });
   next();
 });

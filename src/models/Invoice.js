@@ -72,7 +72,7 @@ const invoiceSchema = new mongoose.Schema(
 );
 
 // Soft delete middleware
-invoiceSchema.pre(/^find/, function (next) {
+invoiceSchema.pre(/^(find|count)/, function (next) {
   this.where({ isDeleted: { $ne: true } });
   next();
 });

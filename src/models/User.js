@@ -117,7 +117,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // Soft delete middleware
-userSchema.pre(/^find/, function (next) {
+userSchema.pre(/^(find|count)/, function (next) {
   this.where({ isDeleted: { $ne: true } });
   next();
 });
