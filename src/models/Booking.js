@@ -138,6 +138,20 @@ const bookingSchema = new mongoose.Schema(
       default: 0,
       min: [0, 'Discount cannot be negative'],
     },
+    roomHistory: [
+      {
+        room: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Room',
+        },
+        roomNumber: String,
+        roomType: String,
+        pricePerNight: Number,
+        nights: Number,
+        startDate: Date,
+        endDate: Date,
+      }
+    ],
     isDeleted: {
       type: Boolean,
       default: false,

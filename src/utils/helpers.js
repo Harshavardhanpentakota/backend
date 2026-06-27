@@ -76,6 +76,35 @@ const addGST = (baseAmount, gstPercent = 12) => {
   return { subtotal: baseAmount, tax, totalAmount: baseAmount + tax };
 };
 
+/**
+ * Calculate total room cost considering room stay history
+ * @param {object} booking
+ * @param {number} totalNights
+ * @returns {number}
+ */
+const calculateRoomSubtotal = (booking, totalNights) => {
+  const nights = totalNights !== undefined ? totalNights : booking.nights;
+  if (!booking.roomHistory || booking.roomHistory.length === 0) {
+    return booking.pricePerNight * nights;
+  }
+
+  let subtotal = 0;
+  let remainingNights = nights;
+
+  for (const h of booking.roomHistory) {
+    if (remainingNights <= 0) break;
+    const nightsToCharge = Math.min(h.nights, remainingNights);
+    subtotal += h.pricePerNight * nightsToCharge;
+    remainingNights -= nightsToCharge;
+  }
+
+  if (remainingNights > 0) {
+    subtotal += (booking.pricePerNight || 0) * remainingNights;
+  }
+
+  return subtotal;
+};
+
 module.exports = {
   parsePagination,
   generateBookingId,
@@ -83,4 +112,5 @@ module.exports = {
   calculateNights,
   calculateRefund,
   addGST,
+  calculateRoomSubtotal,
 };

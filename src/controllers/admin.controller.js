@@ -8,7 +8,7 @@ const Payment = require('../models/Payment');
 const Staff = require('../models/Staff');
 const HotelSettings = require('../models/HotelSettings');
 const { sendSuccess, sendError } = require('../utils/response');
-const { parsePagination } = require('../utils/helpers');
+const { parsePagination, calculateRoomSubtotal } = require('../utils/helpers');
 const { BOOKING_STATUS, ROOM_STATUS, PAYMENT_STATUS, STAFF_ROLES, SHIFT, ROLES } = require('../constants');
 const ActivityLog = require('../models/ActivityLog');
 const { logActivity } = require('../utils/activity');
@@ -338,22 +338,73 @@ const changeGuestRoom = async (req, res, next) => {
 
     const oldRoomId = booking.room._id;
 
+    // Record history of the old room stay
+    const checkInTime = booking.actualCheckIn || booking.checkInDate;
+    let lastTransitionDate = checkInTime;
+    if (booking.roomHistory && booking.roomHistory.length > 0) {
+      lastTransitionDate = booking.roomHistory[booking.roomHistory.length - 1].endDate;
+    }
+
+    const now = new Date();
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const diff = now - new Date(lastTransitionDate);
+    const nightsInCurrentRoom = Math.max(0, Math.round(diff / msPerDay));
+
+    if (!booking.roomHistory) {
+      booking.roomHistory = [];
+    }
+
+    booking.roomHistory.push({
+      room: booking.room._id,
+      roomNumber: booking.room.roomNumber,
+      roomType: booking.room.type || booking.roomType,
+      pricePerNight: booking.pricePerNight,
+      nights: nightsInCurrentRoom,
+      startDate: lastTransitionDate,
+      endDate: now,
+    });
+
     // Recalculate subtotal with new room price
     const nights = booking.nights;
     const effectivePrice = newRoom.customPrice ?? newRoom.price;
-    const newSubtotal = effectivePrice * nights;
-    const settings = await HotelSettings.getSettings();
-    const cgst = Math.round(newSubtotal * settings.cgstPercentage) / 100;
-    const sgst = Math.round(newSubtotal * settings.sgstPercentage) / 100;
-    const tax = cgst + sgst;
-    const totalAmount = newSubtotal + tax + (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
 
     booking.room = newRoomId;
     booking.pricePerNight = effectivePrice;
+
+    const newSubtotal = calculateRoomSubtotal(booking, nights);
+    const settings = await HotelSettings.getSettings();
+
+    const discountVal = booking.discount || 0;
+    const extraChargesTotal = (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
+    const subtotal = newSubtotal + extraChargesTotal;
+    const discountedSubtotal = Math.max(0, subtotal - discountVal);
+
+    const cgst = Math.round(discountedSubtotal * settings.cgstPercentage) / 100;
+    const sgst = Math.round(discountedSubtotal * settings.sgstPercentage) / 100;
+    const tax = cgst + sgst;
+    const totalAmount = discountedSubtotal + tax;
+
     booking.subtotal = newSubtotal;
     booking.tax = tax;
     booking.totalAmount = totalAmount;
     await booking.save();
+
+    // Sync Invoice if it exists
+    const Invoice = require('../models/Invoice');
+    const invoice = await Invoice.findOne({ booking: booking._id });
+    if (invoice) {
+      invoice.room = newRoomId;
+      invoice.roomSubtotal = newSubtotal;
+      invoice.subtotal = subtotal;
+      invoice.cgstPercentage = settings.cgstPercentage;
+      invoice.sgstPercentage = settings.sgstPercentage;
+      invoice.cgst = cgst;
+      invoice.sgst = sgst;
+      invoice.tax = tax;
+      invoice.totalAmount = totalAmount;
+      invoice.balanceDue = Math.max(0, totalAmount - (invoice.advancePaid || 0));
+      await invoice.save();
+    }
 
     // Free old room, occupy new room
     await Room.findByIdAndUpdate(oldRoomId, { status: ROOM_STATUS.AVAILABLE });

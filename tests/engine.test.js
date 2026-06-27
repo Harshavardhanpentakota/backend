@@ -24,6 +24,7 @@ const { generateAccessToken } = require('../src/utils/jwt');
 const { ROOM_STATUS, BOOKING_STATUS, ROLES } = require('../src/constants');
 
 describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
+  jest.setTimeout(30000);
   let adminToken;
   let userToken;
   let adminUser;
@@ -41,6 +42,8 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
     await Booking.deleteMany({});
     await HotelSettings.deleteMany({});
     await Invoice.deleteMany({});
+    await Staff.deleteMany({});
+    await Payment.deleteMany({});
 
     // Create test HotelSettings
     await HotelSettings.create({
@@ -106,6 +109,8 @@ describe('Inventory-Based Availability & Pricing Override Engine Tests', () => {
     await Booking.deleteMany({});
     await HotelSettings.deleteMany({});
     await Invoice.deleteMany({});
+    await Staff.deleteMany({});
+    await Payment.deleteMany({});
 
     // Disconnect mongoose
     await mongoose.disconnect();

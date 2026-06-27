@@ -10,7 +10,7 @@ const {
 } = require('../constants');
 const { sendSuccess, sendError } = require('../utils/response');
 const {
-  generateBookingId, generateInvoiceNumber, calculateNights,
+  generateBookingId, generateInvoiceNumber, calculateNights, calculateRoomSubtotal,
 } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { createNotification } = require('../utils/notification');
@@ -460,7 +460,7 @@ const checkOut = async (req, res, next) => {
     }
 
     const settings = await HotelSettings.getSettings();
-    const calculatedRoomSubtotal = nightsStayed * booking.pricePerNight;
+    const calculatedRoomSubtotal = calculateRoomSubtotal(booking, nightsStayed);
     const finalRoomSubtotal = customRoomSubtotal !== undefined ? Number(customRoomSubtotal) : calculatedRoomSubtotal;
     const inv = buildInvoiceData(booking, settings, finalRoomSubtotal, discount);
 
@@ -665,17 +665,21 @@ const extendStay = async (req, res, next) => {
     const previousNights = booking.nights;
 
     const newNights = calculateNights(booking.checkInDate, newCheckOut);
-    const newSubtotal = booking.pricePerNight * newNights;
+    const newSubtotal = calculateRoomSubtotal(booking, newNights);
 
     const settings = await HotelSettings.getSettings();
     const cgstPct = settings.cgstPercentage;
     const sgstPct = settings.sgstPercentage;
-    const cgst = Math.round(newSubtotal * cgstPct) / 100;
-    const sgst = Math.round(newSubtotal * sgstPct) / 100;
-    const tax = cgst + sgst;
 
+    const discountVal = booking.discount || 0;
     const extraChargesTotal = (booking.extraCharges || []).reduce((s, c) => s + c.amount, 0);
-    const totalAmount = newSubtotal + extraChargesTotal + tax;
+    const subtotal = newSubtotal + extraChargesTotal;
+    const discountedSubtotal = Math.max(0, subtotal - discountVal);
+
+    const cgst = Math.round(discountedSubtotal * cgstPct) / 100;
+    const sgst = Math.round(discountedSubtotal * sgstPct) / 100;
+    const tax = cgst + sgst;
+    const totalAmount = discountedSubtotal + tax;
 
     booking.checkOutDate = newCheckOut;
     booking.nights = newNights;
@@ -684,6 +688,22 @@ const extendStay = async (req, res, next) => {
     booking.totalAmount = totalAmount;
 
     await booking.save();
+
+    // Sync Invoice if it exists
+    const Invoice = require('../models/Invoice');
+    const invoice = await Invoice.findOne({ booking: booking._id });
+    if (invoice) {
+      invoice.roomSubtotal = newSubtotal;
+      invoice.subtotal = subtotal;
+      invoice.cgstPercentage = cgstPct;
+      invoice.sgstPercentage = sgstPct;
+      invoice.cgst = cgst;
+      invoice.sgst = sgst;
+      invoice.tax = tax;
+      invoice.totalAmount = totalAmount;
+      invoice.balanceDue = Math.max(0, totalAmount - (invoice.advancePaid || 0));
+      await invoice.save();
+    }
 
     await logActivity({
       req,

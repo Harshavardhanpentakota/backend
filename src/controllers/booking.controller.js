@@ -54,10 +54,14 @@ const createBooking = async (req, res, next) => {
       return sendError(res, 400, 'Selected room type is no longer available for the selected dates.');
     }
 
+    const HotelSettings = require('../models/HotelSettings');
+    const settings = await HotelSettings.getSettings();
+    const gstPercent = (settings.cgstPercentage || 6) + (settings.sgstPercentage || 6);
+
     const nights = calculateNights(checkIn, checkOut);
     const pricePerNight = sampleRoom.price;
     const baseAmount = pricePerNight * nights;
-    const { subtotal, tax, totalAmount } = addGST(baseAmount);
+    const { subtotal, tax, totalAmount } = addGST(baseAmount, gstPercent);
 
     const bookingId = generateBookingId();
 
