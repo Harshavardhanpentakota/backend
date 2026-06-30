@@ -37,6 +37,10 @@ router.get('/reports/revenue', getRevenueReport);
 router.get('/reports/occupancy', getOccupancyReport);
 router.get('/reports/bookings-by-room-type', getBookingsByRoomType);
 
+// Hotel Settings
+router.get('/settings', getSettings);
+router.patch('/settings', updateSettings);
+
 // Activity logs
 router.get('/activity-logs', getActivityLogs);
 router.get('/activity-logs/export', exportActivityLogs);
